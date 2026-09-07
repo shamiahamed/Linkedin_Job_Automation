@@ -13,7 +13,22 @@ from security import require_api_token
 from routes import jobs, applications, email_routes
 
 
-Base.metadata.create_all(bind=engine)
+# Create tables on startup — never crash a worker if the DB is cold/ waking
+# (Neon scales to zero): retry in the startup event instead.
+def _ensure_tables(retries: int = 4, wait: float = 5.0):
+    import time
+
+    for i in range(retries):
+        try:
+            Base.metadata.create_all(bind=engine)
+            return
+        except Exception:
+            if i == retries - 1:
+                return
+            time.sleep(wait)
+
+
+_ensure_tables()
 
 # Lightweight migration: add apply_link to existing SQLite DB (idempotent, SQLite only)
 if Config.DATABASE_URL.startswith("sqlite"):
@@ -108,8 +123,10 @@ def root():
 
 
 @app.on_event("startup")
-async def _start_cleaner():
-    """Every few hours, delete no-contact jobs older than 24h."""
+async def _startup():
+    """Create tables with retry (Neon wakes from zero on first connect), then
+    run the periodic no-contact cleaner."""
+    _ensure_tables(retries=3, wait=3.0)
     from routes.jobs import cleanup_no_contact
     from database import SessionLocal
 
