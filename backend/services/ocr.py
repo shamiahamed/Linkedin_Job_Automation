@@ -4,6 +4,7 @@ Install Tesseract on Windows: https://github.com/UB-Mannheim/tesseract/wiki
 """
 import subprocess
 import sys
+import time
 import pytesseract
 from PIL import Image, ImageOps
 from pathlib import Path
@@ -63,7 +64,7 @@ class OCRProcessor:
         img = Image.open(image_path)
         img = img.convert("L")
         w, h = img.size
-        max_dim = 1200
+        max_dim = 800
         if max(w, h) > max_dim:
             scale = max_dim / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
@@ -72,22 +73,24 @@ class OCRProcessor:
         img = ImageOps.autocontrast(img)
         binary = img.point(lambda p: 255 if p > 140 else 0)
 
+        # Hard budget: stays well under Render's 60s response cap on 0.1 CPU.
         passes = [
-            (img, "6"),
-            (binary, "11"),
-            (img, "11"),
-            (img, "3"),
+            (img, "6", 15),
+            (binary, "11", 15),
+            (img, "11", 12),
         ]
-        best, best_score, got_good = "", 0, False
-        for variant, psm in passes:
-            txt = self._ocr(variant, psm)
+        best, best_score, got_good, started = "", 0, False, time.time()
+        for variant, psm, to in passes:
+            if time.time() - started > 38:
+                break
+            txt = self._ocr(variant, psm, timeout=to)
             score = self._score(txt)
             if score > best_score:
                 best, best_score = txt, score
-            if score >= 12:
+            if score >= 6:
                 got_good = True
                 break
-        if got_good or best_score >= 6:
+        if got_good or best_score >= 4:
             return best
         if best:
             return best
