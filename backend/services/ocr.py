@@ -64,7 +64,7 @@ class OCRProcessor:
         img = Image.open(image_path)
         img = img.convert("L")
         w, h = img.size
-        max_dim = 800
+        max_dim = 500
         if max(w, h) > max_dim:
             scale = max_dim / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
@@ -74,25 +74,25 @@ class OCRProcessor:
         binary = img.point(lambda p: 255 if p > 140 else 0)
         binary_inv = binary.point(lambda p: 255 - p)
 
-        # Render free = 0.1 CPU: a single generous pass beats several short
-        # killed passes. Hard budget keeps total inside Render's 60s cap.
+        # Render free = 0.1 CPU: keep TOTAL tesseract time under ~40s so the
+        # request stays inside Render's 60s response cap. Small image = fast.
         passes = [
-            (img, "6", 30),
+            (img, "6", 20),
             (binary_inv, "6", 12),
             (binary, "11", 10),
         ]
         best, best_score, got_good, started = "", 0, False, time.time()
         for variant, psm, to in passes:
-            if time.time() - started > 46:
+            if time.time() - started > 44:
                 break
             txt = self._ocr(variant, psm, timeout=to)
             score = self._score(txt)
             if score > best_score:
                 best, best_score = txt, score
-            if score >= 6:
+            if score >= 8:
                 got_good = True
                 break
-        if got_good or best_score >= 4:
+        if got_good or best_score >= 5:
             return best
         if best:
             return best

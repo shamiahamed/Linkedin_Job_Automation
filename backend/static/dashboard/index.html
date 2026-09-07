@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="Job Auto-Apply">
     <link rel="apple-touch-icon" href="/static/dashboard/icons/icon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', system-ui, sans-serif; }
         .badge-email::before { content: "✉️ "; }
@@ -384,8 +385,48 @@ ${(job.description || '').substring(0, 1000)}`;
             const file = document.getElementById('fileInput').files[0];
             if (!file) { showToast('Select a screenshot first', true); return; }
             const status = document.getElementById('ocrStatus');
-            status.textContent = 'Processing...';
+            status.textContent = 'OCR on device…';
 
+            // 1) Try in-browser OCR (device does the work — fast on any phone/PC,
+            //    never hits Render's weak free CPU, works for your friend too).
+            let text = '';
+            if (window.Tesseract) {
+                try {
+                    const { data } = await Tesseract.recognize(file, 'eng', {
+                        logger: m => {
+                            if (m.status === 'recognizing text')
+                                status.textContent = 'Reading: ' + Math.round(m.progress * 100) + '%…';
+                        }
+                    });
+                    text = (data.text || '').trim();
+                } catch (e) { status.textContent = 'Device OCR failed, using server…'; }
+            }
+
+            if (text.length >= 30) {
+                // Smart path: AI extraction + same gates as paste (auto-apply email included).
+                try {
+                    const res = await api('/api/jobs/from-text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, source: 'ocr_mobile' })
+                    });
+                    const d = await res.json();
+                    if (!res.ok) throw new Error(d.detail || 'Capture failed');
+                    showToast(`Captured: ${d.title} @ ${d.company || 'unknown'} — ${d.status.replace(/_/g, ' ')}`);
+                    document.getElementById('fileInput').value = '';
+                    loadJobs();
+                    fetchStats();
+                    status.textContent = '';
+                    return;
+                } catch (e) {
+                    showToast(e.message || 'Capture failed', true);
+                    status.textContent = '';
+                    return;
+                }
+            }
+
+            // 2) Fallback: server-side Tesseract (small image, bounded budget).
+            status.textContent = 'Processing on server…';
             const fd = new FormData();
             fd.append('file', file);
             try {
