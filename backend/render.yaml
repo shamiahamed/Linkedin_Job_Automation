@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: job-auto-apply
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: job-auto-apply-db
+          property: connectionString
+      - key: API_TOKEN
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        sync: false
+      - key: YOUR_NAME
+        sync: false
+      - key: YOUR_PHONE
+        sync: false
+      - key: YOUR_EMAIL
+        sync: false
+      - key: DEBUG
+        value: "false"
+
+databases:
+  - name: job-auto-apply-db
+    plan: free

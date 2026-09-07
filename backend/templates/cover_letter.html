@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<body
+    style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: #f4f6f8; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0;">
+        <h2 style="color: #2563eb; margin-top: 0;">Application: {{ job_title }}</h2>
+        <hr style="border: none; border-top: 1px solid #e0e0e0;">
+
+        <p>Dear Hiring Manager,</p>
+
+        <p>I hope this email finds you well. I am writing to express my strong interest in the
+            <strong>{{ job_title }}</strong> position at <strong>{{ company }}</strong>
+            {% if salary %}({{ salary }}){% endif %}.
+            I came across this opportunity and believe my skills and experience align well with the role's requirements.
+        </p>
+
+        <p>{{ custom_paragraph }}</p>
+
+        <p>You can view my recent projects on GitHub:
+            <a href="https://github.com/shamiahamed"
+                style="color:#2563eb;text-decoration:none;font-weight:600">
+                GitHub
+            </a>.
+        </p>
+
+        <p>I have attached my resume for your review. I am available for an interview at your convenience
+            and can be reached anytime. I would welcome the opportunity to discuss how I can contribute to your team.
+        </p>
+
+        <p>Thank you for considering my application. I look forward to hearing from you.</p>
+
+        <br>
+        <p>Best regards,</p>
+        <p><strong>{{ applicant_name }}</strong></p>
+        <p>📞 {{ applicant_phone }}</p>
+        <p>✉️ {{ applicant_email }}</p>
+                                                                        
+
+    </div>
+</body>
+
+</html>

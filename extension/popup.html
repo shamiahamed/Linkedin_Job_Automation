@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Auto-Apply</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="popup-container">
+        <header>
+            <h1>🎯 Job Auto-Apply</h1>
+            <p class="subtitle">Auto-detect. Auto-capture. Auto-apply.</p>
+        </header>
+
+        <div class="status-indicator" id="statusBar">
+            <span class="status-dot"></span>
+            <span id="statusText">Monitoring LinkedIn...</span>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-number" id="capturedCount">0</span>
+                <span class="stat-label">Captured</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number" id="appliedCount">0</span>
+                <span class="stat-label">Applied</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number" id="phoneCount">0</span>
+                <span class="stat-label">Phone</span>
+            </div>
+        </div>
+
+        <div class="job-details" id="jobDetails" style="display: none;">
+            <h3>Latest Captured Job</h3>
+            <div class="detail-row">
+                <label>Title:</label>
+                <span id="jobTitle">-</span>
+            </div>
+            <div class="detail-row">
+                <label>Company:</label>
+                <span id="jobCompany">-</span>
+            </div>
+            <div class="detail-row">
+                <label>Location:</label>
+                <span id="jobLocation">-</span>
+            </div>
+            <div class="detail-row">
+                <label>Contact:</label>
+                <span id="jobContact">-</span>
+            </div>
+            <button id="applyBtn" class="btn-primary">📧 Send Application</button>
+            <button id="viewDetailsBtn" class="btn-secondary">View Full Details</button>
+        </div>
+
+        <div class="actions">
+            <button id="captureNowBtn" class="btn-primary">📸 Capture Current Job</button>
+            <button id="openDashboardBtn" class="btn-secondary">📊 Open Dashboard</button>
+        </div>
+
+        <footer>
+            <span class="version">v1.0.0</span>
+            <button id="settingsBtn" class="link-btn">⚙️ Settings</button>
+        </footer>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

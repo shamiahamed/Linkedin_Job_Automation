@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Job Auto-Apply Dashboard</title>
+    <link rel="manifest" href="/static/dashboard/manifest.webmanifest">
+    <meta name="theme-color" content="#0a66c2">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Job Auto-Apply">
+    <link rel="apple-touch-icon" href="/static/dashboard/icons/icon-192.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, sans-serif; }
+        .badge-email::before { content: "✉️ "; }
+        .badge-phone::before { content: "📞 "; }
+        #toast { transition: all 0.3s; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-white shadow-md border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <span class="text-2xl">🎯</span>
+                <h1 class="text-xl font-bold text-gray-800">Job Auto-Apply Dashboard</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer select-none" title="Send the application email as soon as a job with an email is captured">
+                    <span>Auto-apply</span>
+                    <button onclick="toggleAutoApply()" type="button" id="autoApplyToggle" class="relative w-10 h-6 rounded-full bg-gray-300 transition-colors">
+                        <span class="absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-all"></span>
+                    </button>
+                </label>
+                <span id="backendStatus" class="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700">Connected</span>
+                <button onclick="openSettings()" class="text-gray-500 hover:text-gray-700">⚙️ Settings</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Stats Cards -->
+    <section class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+            <p class="text-sm text-gray-500">Total Jobs</p>
+            <p id="statTotal" class="text-3xl font-bold text-gray-800">-</p>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+            <p class="text-sm text-gray-500">Applied</p>
+            <p id="statApplied" class="text-3xl font-bold text-green-600">-</p>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+            <p class="text-sm text-gray-500">Phone Summaries</p>
+            <p id="statPhone" class="text-3xl font-bold text-orange-500">-</p>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+            <p class="text-sm text-gray-500">Pending</p>
+            <p id="statPending" class="text-3xl font-bold text-blue-600">-</p>
+        </div>
+    </section>
+
+    <!-- Upload Section -->
+    <section class="max-w-7xl mx-auto px-4 mb-6">
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-5">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">📸 Upload Job Screenshot (OCR)</h2>
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <input id="fileInput" type="file" accept="image/*"
+                       class="block w-full sm:w-auto text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+                <button onclick="uploadScreenshot()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">
+                    Extract Job Details
+                </button>
+                <span id="ocrStatus" class="text-xs text-gray-500"></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Paste & Capture (mobile) -->
+    <section class="max-w-7xl mx-auto px-4 mb-6">
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-5">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1">📋 Paste a LinkedIn Post</h2>
+            <p class="text-xs text-gray-500 mb-3">Copy a job post on your phone and paste it here — no LinkedIn app or extension needed. Works from any browser.</p>
+            <textarea id="pasteText" rows="4" placeholder="Paste the full post text here (role, company, experience, email/phone, apply link)…"
+                      class="w-full text-sm border border-gray-300 rounded-md p-3 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"></textarea>
+            <div class="flex items-center gap-3">
+                <button onclick="captureFromText()" class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 text-sm font-medium">
+                    Capture This Post
+                </button>
+                <span id="pasteStatus" class="text-xs text-gray-500"></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Jobs Table -->
+    <section class="max-w-7xl mx-auto px-4 pb-10">
+        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-800">Captured Jobs</h2>
+                <div class="flex items-center gap-3">
+                    <select id="expFilter" onchange="loadJobs()" class="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white" title="View filter">
+                        <option value="all" selected>All jobs</option>
+                        <option value="0-1">1 Yr or less</option>
+                    </select>
+                    <button onclick="loadJobs()" class="text-blue-600 hover:text-blue-800 text-sm font-medium">🔄 Refresh</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exp</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobsTable" class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading jobs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Auth Gate -->
+    <div id="authGate" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
+            <h2 class="text-lg font-bold text-gray-800 mb-1">🔑 API token required</h2>
+            <p id="authMsg" class="text-xs text-gray-500 mb-3">This server requires a shared token. Enter the API_TOKEN value from the server settings.</p>
+            <input id="tokenInput" type="password" placeholder="API token" autocomplete="off"
+                   class="w-full border border-gray-300 rounded-md px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+            <button onclick="saveToken()" class="w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-700">
+                Save &amp; connect
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="hidden fixed bottom-5 right-5 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm z-50"></div>
+
+    <script>
+        const API = location.origin;
+        let _token = localStorage.getItem('api_token') || '';
+
+        function showAuthGate(msg) {
+            const g = document.getElementById('authGate');
+            if (msg) document.getElementById('authMsg').textContent = msg;
+            g.classList.remove('hidden');
+        }
+
+        async function saveToken() {
+            const t = document.getElementById('tokenInput').value.trim();
+            if (!t) { showAuthGate('Token cannot be empty.'); return; }
+            _token = t;
+            localStorage.setItem('api_token', t);
+            document.getElementById('authGate').classList.add('hidden');
+            showToast('Token saved');
+            try {
+                await fetchStats();
+                await loadJobs();
+                await loadSettings();
+            } catch (e) {
+                showAuthGate('Token rejected. Check it matches API_TOKEN on the server.');
+            }
+        }
+
+        async function api(path, opts = {}) {
+            opts.headers = Object.assign({}, opts.headers || {}, _token ? { 'X-API-Key': _token } : {});
+            const res = await fetch(API + path, opts);
+            if (res.status === 401) {
+                localStorage.removeItem('api_token');
+                showAuthGate('Invalid or missing API token.');
+                throw new Error('unauthorized');
+            }
+            return res;
+        }
+
+        function showToast(msg, isError = false) {
+            const t = document.getElementById('toast');
+            t.textContent = (isError ? '❌ ' : '✅ ') + msg;
+            t.className = 'fixed bottom-5 right-5 px-4 py-3 rounded-lg shadow-lg text-sm z-50 ' + (isError ? 'bg-red-600' : 'bg-emerald-600') + ' text-white font-semibold';
+            clearTimeout(t._toastTimer);
+            t._toastTimer = setTimeout(() => t.className = 'hidden', 6000);
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await api('/api/stats');
+                const s = await res.json();
+                document.getElementById('statTotal').textContent = s.total_jobs;
+                document.getElementById('statApplied').textContent = s.applied;
+                document.getElementById('statPhone').textContent = s.phone_summaries_sent;
+                document.getElementById('statPending').textContent = s.pending;
+            } catch (e) {
+                document.getElementById('backendStatus').textContent = 'Offline';
+                document.getElementById('backendStatus').className = 'px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700';
+            }
+        }
+
+        function contactCell(job) {
+            if (job.emails && job.emails.length) return `<span class="badge-email text-blue-700">${job.emails[0]}</span>`;
+            if (job.phones && job.phones.length) return `<span class="badge-phone text-orange-700">${job.phones[0]}</span>`;
+            return '<span class="text-gray-400">—</span>';
+        }
+
+        function statusBadge(status) {
+            const map = {
+                applied: 'bg-green-100 text-green-700',
+                pending: 'bg-yellow-100 text-yellow-700',
+                phone_summary_sent: 'bg-orange-100 text-orange-700',
+                phone_only: 'bg-purple-100 text-purple-700',
+                no_contact: 'bg-red-100 text-red-700',
+                apply_link: 'bg-teal-100 text-teal-700',
+                link_email_sent: 'bg-indigo-100 text-indigo-700',
+                duplicate: 'bg-amber-100 text-amber-700'
+            };
+            return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}">${status.replace(/_/g, ' ')}</span>`;
+        }
+
+        function expMonths(text) {
+            const t = ' ' + String(text || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+            let months = null;
+            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) {
+                months = Math.min(months ?? 12, 12);
+            }
+            const re = /\b(\d{1,2})(?:\s*(?:[-–—to+]\s*)(\d{1,2}))?\s*(?:plus|\+)?\s*(?:years?|yrs?)\b/g;
+            let m;
+            while ((m = re.exec(t)) !== null) {
+                const a = parseInt(m[1], 10);
+                const b = m[2] ? parseInt(m[2], 10) : a;
+                const ub = Math.max(a, b) * 12;
+                months = months === null ? ub : Math.max(months, ub);
+            }
+            return months;
+        }
+
+        function compactExp(job) {
+            const raw = String(job.experience || '');
+            if (/^fresher/i.test(raw)) return 'Fresher';
+            if (raw.trim()) {
+                const m = raw.match(/(\d+(?:\.\d+)?)/);
+                if (m) {
+                    if (m[1] === '0' || /\b0\s*[-–—to]\s*1\b/i.test(raw)) return 'Fresher';
+                    return m[1];
+                }
+            }
+            const t = ' ' + String(job.description || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) return 'Fresher';
+            return raw.trim() || '-';
+        }
+
+        function expMinMonths(text) {
+            const t = ' ' + String(text || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+            const mins = [];
+            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) mins.push(12);
+            const re = /\b(\d{1,2})(?:\s*(?:[-–—to+]\s*)(\d{1,2}))?\s*(?:plus|\+)?\s*(?:years?|yrs?)\b/g;
+            let m;
+            while ((m = re.exec(t)) !== null) mins.push(parseInt(m[1], 10) * 12);
+            return mins.length ? Math.min(...mins) : null;
+        }
+
+        function matchesExpView(job) {
+            if (document.getElementById('expFilter').value === 'all') return true;
+            const months = expMinMonths((job.experience || '') + ' ' + (job.description || ''));
+            return months !== null && months <= 12;
+        }
+
+        async function loadJobs() {
+            try {
+                const res = await api('/api/jobs');
+                const all = await res.json();
+                const jobs = all.filter(matchesExpView);
+                const tbody = document.getElementById('jobsTable');
+                if (!jobs.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No 0-1 year jobs. Switch the filter to "All jobs" to see everything.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = jobs.map(job => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-5 py-3 text-sm font-medium text-gray-800 max-w-xs truncate">${job.title || '-'}</td>
+                        <td class="px-5 py-3 text-sm text-gray-600">${job.company || '-'}</td>
+                        <td class="px-5 py-3 text-sm text-gray-600">${job.location || '-'}</td>
+                        <td class="px-5 py-3 text-sm">${contactCell(job)}</td>
+                        <td class="px-5 py-3 text-sm text-gray-600" title="${job.experience ? 'Experience mentioned: ' + job.experience : ''}">${compactExp(job)}</td>
+                        <td class="px-5 py-3">${statusBadge(job.status)}</td>
+                        <td class="px-5 py-3 text-sm">
+${job.apply_link && !(job.emails && job.emails.length) && !(job.phones && job.phones.length)
+    ? `<a href="${job.apply_link}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 font-medium mr-3">🔗 Open</a>`
+    : ''}
+<button onclick="applyJob(${job.id}, '${job.status}')" class="text-blue-600 hover:text-blue-800 font-medium mr-3 ${job.emails && job.emails.length ? '' : (job.phones && job.phones.length ? 'text-orange-600 hover:text-orange-800' : (job.apply_link ? 'hidden' : 'text-gray-400 cursor-not-allowed'))}">
+    ${job.emails && job.emails.length ? '📧 Apply' : (job.phones && job.phones.length ? '📞 Summary' : (job.apply_link ? '' : 'No contact'))}
+</button>
+<button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700">👁 View</button>
+                            <button onclick="deleteJob(${job.id})" class="text-red-500 hover:text-red-700 ml-2" title="Delete">🗑</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                document.getElementById('jobsTable').innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-red-400">Cannot reach backend. Start the server first.</td></tr>';
+            }
+        }
+
+        async function deleteJob(id) {
+            if (!confirm('Delete this job permanently?')) return;
+            try {
+                const res = await api(`/api/jobs/${id}`, { method: 'DELETE' });
+                if (!res.ok) { showToast('Delete failed', true); return; }
+                showToast('Job deleted');
+                loadJobs();
+                fetchStats();
+            } catch (e) {
+                showToast('Delete failed', true);
+            }
+        }
+
+        async function applyJob(id, status) {
+            const alreadySent = (status === 'applied' || status === 'phone_summary_sent');
+            if (alreadySent &&
+                !confirm('This was already sent once. Send again as a follow-up to get the recruiter\'s attention?')) {
+                showToast('Re-send cancelled — nothing sent.', true);
+                return;
+            }
+            const doApply = async (confirmDup) => {
+                const r = await api(`/api/jobs/${id}/apply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm_duplicate: confirmDup })
+                });
+                let d = null;
+                try { d = r.ok ? await r.json() : null; } catch (e) { d = null; }
+                return { d, ok: r.ok };
+            };
+            let { d: data, ok } = await doApply(false);
+            if (data && data.duplicate_email) {
+                if (!confirm('⚠ THIS EMAIL ALREADY RECEIVED AN APPLICATION.\n\nVerify this is a genuinely different opening, then send anyway?')) {
+                    showToast('No email sent — cancelled (this email already received an application).', true);
+                    return;
+                }
+                ({ d: data, ok } = await doApply(true));
+                if ((data && data.duplicate_email) || (data && data.error)) {
+                    showToast((data && data.error || 'Apply failed').replace(/^Error: /, ''), true);
+                    return;
+                }
+            }
+            if (data && data.success) {
+                if (data.type === 'email') {
+                    showToast(`Application sent to ${data.to_email}`);
+                } else {
+                    showToast('Phone summary sent to your inbox');
+                }
+                loadJobs();
+                fetchStats();
+            } else if (data) {
+                showToast((data.error || 'Apply failed').replace(/^Error: /, ''), true);
+            } else if (!ok) {
+                showToast('Server error (HTTP request failed)', true);
+            } else {
+                showToast('Unexpected response from server', true);
+            }
+        }
+
+        function viewJob(id) {
+            api(`/api/jobs/${id}`).then(r => r.json()).then(job => {
+                const dupNote = job.status === 'duplicate'
+                    ? '\n\n⚠ SAME EMAIL ALREADY RECEIVED AN APPLICATION.\nVerify before re-applying — use Apply only if it\'s a genuinely different opening.\n'
+                    : '';
+                const details = `
+Position: ${job.title || '-'}
+Company: ${job.company || '-'}
+Location: ${job.location || '-'}
+Experience: ${job.experience || '-'}
+Emails: ${(job.emails || []).join(', ') || '-'}
+Phones: ${(job.phones || []).join(', ') || '-'}
+Apply Link: ${job.apply_link || '-'}
+${job.url ? '\nLink: ' + job.url : ''}${dupNote}
+
+${(job.description || '').substring(0, 1000)}`;
+                window.alert(details);
+            });
+        }
+
+        async function uploadScreenshot() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) { showToast('Select a screenshot first', true); return; }
+            const status = document.getElementById('ocrStatus');
+            status.textContent = 'Processing...';
+
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await api('/api/ocr/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Job "${data.job.title}" extracted from screenshot`);
+                    loadJobs();
+                    fetchStats();
+                } else {
+                    showToast(data.message || 'Could not identify job from screenshot', true);
+                }
+            } catch (e) {
+                showToast('OCR failed. Is Tesseract installed?', true);
+            }
+            status.textContent = '';
+        }
+
+        function setAutoApplyUI(on) {
+            const t = document.getElementById('autoApplyToggle');
+            t.className = 'relative w-10 h-6 rounded-full transition-colors ' + (on ? 'bg-green-500' : 'bg-gray-300');
+            t.firstElementChild.className = 'absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-all' + (on ? ' translate-x-4' : '');
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await api('/api/settings');
+                setAutoApplyUI((await res.json()).auto_apply);
+            } catch (e) { /* backend offline */ }
+        }
+
+        async function toggleAutoApply() {
+            const t = document.getElementById('autoApplyToggle');
+            const next = !t.className.includes('bg-green-500');
+            try {
+                await api('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ auto_apply: next })
+                });
+            } catch (e) { /* ignore */ }
+            setAutoApplyUI(next);
+            showToast(next ? 'Auto-apply ON — new jobs with an email get applied instantly' : 'Auto-apply OFF');
+        }
+
+        async function captureFromText() {
+            const text = document.getElementById('pasteText').value.trim();
+            if (text.length < 30) {
+                showToast('Paste more of the post — role, company and contact info', true);
+                return;
+            }
+            const st = document.getElementById('pasteStatus');
+            st.textContent = 'Analyzing with AI…';
+            try {
+                const res = await api('/api/jobs/from-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, source: 'mobile' })
+                });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Capture failed');
+                showToast(`Captured: ${d.title} @ ${d.company || 'unknown'} — ${d.status.replace(/_/g, ' ')}`);
+                document.getElementById('pasteText').value = '';
+                loadJobs();
+                fetchStats();
+            } catch (e) {
+                showToast(e.message || 'Capture failed. Is the server reachable?', true);
+            }
+            st.textContent = '';
+        }
+
+        function openSettings() {
+            const name = prompt('Your name:', 'Shamim Ahamed J');
+            if (name === null) return;
+            const phone = prompt('Your phone:', '9894593190');
+            if (phone === null) return;
+            const email = prompt('Your email:', 'ahamedshamin5@gmail.com');
+            if (email === null) return;
+            localStorage.setItem('profile', JSON.stringify({ name, phone, email }));
+            showToast('Profile saved locally (backend .env is authoritative)');
+        }
+
+        // PWA: installable + offline shell (HTTPS / localhost only)
+        if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+            navigator.serviceWorker.register('/static/dashboard/service-worker.js').catch(() => {});
+        }
+
+        // Init
+        fetchStats();
+        loadJobs();
+        loadSettings();
+        setInterval(() => { fetchStats(); loadJobs(); }, 30000);
+    </script>
+</body>
+</html>

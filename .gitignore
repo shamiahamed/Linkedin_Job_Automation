@@ -1,0 +1,31 @@
+# Secrets — never commit these
+.env
+
+# Local runtime data
+*.db
+*.sqlite
+*.sqlite3
+backend/job_automation.db
+
+# Logs
+debug.log
+*.log
+
+# Personal resumes / PII
+backend/resumes/*.pdf
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

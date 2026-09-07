@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Job Auto-Apply Assistant",
+  "version": "1.0.0",
+  "description": "Automatically detects LinkedIn job posts, extracts details, and sends applications via email",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://*.onrender.com/*",
+    "http://localhost:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Job Auto-Apply"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
