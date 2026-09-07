@@ -81,6 +81,13 @@ def dashboard_jobs():
 DEBUG_LOG = Path(__file__).parent / "debug.log"
 
 
+@app.get("/health", include_in_schema=False)
+def health():
+    """Public readiness probe for Render — deliberately OUTSIDE the API token
+    gate so platform health checks (no auth header) can reach it."""
+    return {"status": "ok", "app": Config.APP_NAME}
+
+
 @app.post("/api/debug/log", dependencies=_AUTH)
 async def debug_log(request: Request):
     try:

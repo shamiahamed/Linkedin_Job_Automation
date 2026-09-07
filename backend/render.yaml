@@ -4,7 +4,7 @@ services:
     runtime: docker
     rootDir: backend
     plan: free
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
