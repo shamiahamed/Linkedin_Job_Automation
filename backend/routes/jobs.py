@@ -276,10 +276,16 @@ _COMPANY_LEGAL = {"pvt", "ltd", "llp", "llc", "inc", "private", "limited", "and"
 
 def _company_ok(company: str) -> bool:
     """A confident company name: real title-cased name, not a sentence fragment
-    ('American businesses,' / person names / 4-letter filenames like 'Face')."""
+    ('American businesses,' / person names / 4-letter filenames like 'Face' /
+    'that MitrahSoft' / 'HODs can secure')."""
     c = (company or "").strip()
     words = [w for w in c.split() if w]
     if not words or len(c) < 5 or not re.search(r"[A-Z]", c):
+        return False
+    first = words[0].lower().rstrip(".,")
+    # A real company rarely starts with a pronoun/verb filler mid-sentence.
+    if first in _COMPANY_STOP or first in {"that", "we", "they", "i", "me", "you",
+                                          "here", "now", "join", "started", "new"}:
         return False
     for w in words[1:]:
         if re.match(r"^[a-z]", w) and w.rstrip(".,").lower() not in _COMPANY_LEGAL:

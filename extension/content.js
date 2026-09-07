@@ -450,7 +450,7 @@ const JobDetector = {
     const legal = /\b(?:pvt\.?|private|limited|ltd\.?|llp|llc|inc\.?)\b/i;
     let words = cand.split(/\s+/).filter(Boolean);
     while (words.length && (legal.test(words[words.length - 1]) || stop.test(words[words.length - 1]))) words.pop();
-    while (words.length && stop.test(words[0])) words.shift();
+    while (words.length && (stop.test(words[0]) || /^(that|with|when|those|these|since|join)\b/i.test(words[0]))) words.shift();
     const seen = new Set();
     const out = [];
     for (const wd of words) {
@@ -713,23 +713,24 @@ const loc = m[1]
       if (!title) return null;
       // Validation: reject junk where neither a role word nor any contact appears
       if (title !== 'Job Opening' && !this.hasRoleWord(text) && !this.hasContactInfo(text)) return null;
-      // Company: prefer the real hiring company found in the post text
-      const companyFromText = this.extractCompany(text, title);
-      if (companyFromText) {
-        company = companyFromText;
-      }
-      if (!company) {
-        // Fallback to the "Hide post by <Author>" aria-label (poster/recruiter)
-        const hideBy = card.querySelector('[aria-label^="Hide post by "], [aria-label*="control menu for post by "]');
-        if (hideBy) {
-          company = this.cleanText(hideBy.getAttribute('aria-label').replace(/^(?:hide post by|open control menu for post by)\s+/i, ''));
-        }
-      }
-      // Fallback: LinkedIn actor name element
-      if (!company) {
-        const actor = card.querySelector('.update-components-actor__name, .feed-shared-actor__name, .update-components-actor, [class*="actor__name"]');
-        if (actor) {
-          company = this.cleanText(actor.innerText).split('\n')[0];
+      // Company: LinkedIn's own author metadata is the most reliable and exact
+      // name (a company page literally names the company). Prefer it over regex
+      // guesses, since text-match can capture sentence fragments ("that X").
+      const hideBy = card.querySelector('[aria-label^="Hide post by "], [aria-label*="control menu for post by "]');
+      const actor = card.querySelector('.update-components-actor__name, .feed-shared-actor__name, .update-components-actor, [class*="actor__name"]');
+      const actorName = hideBy
+        ? this.cleanText(hideBy.getAttribute('aria-label').replace(/^(?:hide post by|open control menu for post by)\s+/i, ''))
+        : (actor ? this.cleanText(actor.innerText).split('\n')[0] : '');
+      const actorCompany = actorName
+        ? this.normalizeCompanyCand(actorName.replace(/\s*\|\s*$/i, ''))
+        : '';
+      if (actorCompany) {
+        company = actorCompany;
+      } else {
+        // Only if LinkedIn gave no reliable author name, fall back to the post text
+        const companyFromText = this.extractCompany(text, title);
+        if (companyFromText) {
+          company = companyFromText;
         }
       }
       // Location often appears after the company/hashtag block
