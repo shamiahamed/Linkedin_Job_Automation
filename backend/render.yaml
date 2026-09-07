@@ -2,8 +2,9 @@ services:
   - type: web
     name: job-auto-apply
     runtime: docker
+    rootDir: backend
     plan: free
-    healthCheckPath: /health
+    healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
