@@ -72,16 +72,18 @@ class OCRProcessor:
             img = img.resize((w * 2, h * 2), Image.LANCZOS)
         img = ImageOps.autocontrast(img)
         binary = img.point(lambda p: 255 if p > 140 else 0)
+        binary_inv = binary.point(lambda p: 255 - p)
 
-        # Hard budget: stays well under Render's 60s response cap on 0.1 CPU.
+        # Render free = 0.1 CPU: a single generous pass beats several short
+        # killed passes. Hard budget keeps total inside Render's 60s cap.
         passes = [
-            (img, "6", 15),
-            (binary, "11", 15),
-            (img, "11", 12),
+            (img, "6", 30),
+            (binary_inv, "6", 12),
+            (binary, "11", 10),
         ]
         best, best_score, got_good, started = "", 0, False, time.time()
         for variant, psm, to in passes:
-            if time.time() - started > 38:
+            if time.time() - started > 46:
                 break
             txt = self._ocr(variant, psm, timeout=to)
             score = self._score(txt)
