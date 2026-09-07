@@ -31,8 +31,10 @@ async def ocr_upload(file: UploadFile = File(...), db: Session = Depends(get_db)
 
     try:
         parsed = ocr.process_screenshot(str(dest))
-    except FileNotFoundError as e:
-        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"OCR failed: {e}")
 
     if not parsed.get("title"):
         return {
