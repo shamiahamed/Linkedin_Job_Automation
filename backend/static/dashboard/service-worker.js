@@ -1,6 +1,15 @@
-const CACHE = 'jaa-shell-v1';
+const CACHE = 'jaa-shell-v2';
+const PRECACHE = [
+  '/static/dashboard/index.html',
+  '/static/dashboard/manifest.webmanifest',
+  '/static/dashboard/icons/icon-192.png',
+  '/static/dashboard/icons/icon-512.png'
+];
 
 self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(PRECACHE)).catch(() => {})
+  );
   self.skipWaiting();
 });
 
@@ -22,7 +31,7 @@ self.addEventListener('fetch', (e) => {
       c.match(e.request).then((hit) =>
         hit ||
         fetch(e.request).then((res) => {
-          if (res.ok) c.put(e.request, res.clone());
+          if (res.ok && res.type === 'basic') c.put(e.request, res.clone());
           return res;
         }).catch(() =>
           c.match('/static/dashboard/index.html').then((shell) => shell || Response.error())

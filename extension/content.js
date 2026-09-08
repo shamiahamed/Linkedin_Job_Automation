@@ -767,7 +767,68 @@ const loc = m[1]
     job.hasApplyLink = !!job.applyLink;
 
     this.updatePopup(job);
-    this.sendToBackend(job);
+
+    // Confirm-before-send: when enabled on the server, email jobs are staged
+    // for dashboard approval (ready_to_send) instead of auto-sent. Show an
+    // approval card so a wrong capture can be skipped before it reaches the queue.
+    if (job.hasEmail) {
+      this.fetchSettings((s) => {
+        if (s && s.confirm_before_send) {
+          this.showConfirmCard(job, () => this.sendToBackend(job), () => this.showToast('Skipped — not queued.'));
+        } else {
+          this.sendToBackend(job);
+        }
+      });
+    } else {
+      this.sendToBackend(job);
+    }
+  },
+
+  fetchSettings(onReady) {
+    if (this._settingsCache && Date.now() - this._settingsFetchedAt < 60000) {
+      onReady(this._settingsCache);
+      return;
+    }
+    const h = {};
+    if (this.apiToken) h['X-API-Key'] = this.apiToken;
+    fetch(`${this.backendUrl}/api/settings`, { headers: h })
+      .then((r) => r.json())
+      .then((s) => {
+        this._settingsCache = s || {};
+        this._settingsFetchedAt = Date.now();
+        onReady(this._settingsCache);
+      })
+      .catch(() => onReady(null));
+  },
+
+  escHtml(v) {
+    return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+
+  showConfirmCard(job, onApprove, onReject) {
+    const existing = document.getElementById('job-auto-confirm');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.id = 'job-auto-confirm';
+    div.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:999999;background:#fff;color:#111;border:1px solid #dbe3ec;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:16px;width:320px;max-width:calc(100vw - 32px);font:13px -apple-system,\'Segoe UI\',sans-serif;';
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-weight:700;color:#0a66c2;">⚠ Confirm before send</span>
+        <button id="ja-cf-close" style="border:none;background:none;cursor:pointer;font-size:16px;color:#999;">✕</button>
+      </div>
+      <p style="font-weight:600;margin:0 0 2px;">${this.escHtml(job.title)}</p>
+      <p style="color:#666;margin:0 0 8px;">${this.escHtml(job.company || 'unknown company')}</p>
+      <p style="margin:0 0 10px;color:#2563eb;word-break:break-all;">✉️ ${this.escHtml((job.emails || [])[0])}</p>
+      <div style="display:flex;gap:8px;">
+        <button id="ja-cf-ok" style="flex:1;background:#0a66c2;color:#fff;border:none;border-radius:8px;padding:8px;font-weight:600;cursor:pointer;">Capture &amp; queue</button>
+        <button id="ja-cf-no" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:8px;padding:8px;font-weight:600;cursor:pointer;">Skip</button>
+      </div>
+      <p style="margin:8px 0 0;font-size:11px;color:#94a3b8;">Email jobs wait for your approval in the dashboard. Turn Confirm off in Settings to auto-apply instantly.</p>`;
+    document.body.appendChild(div);
+    document.getElementById('ja-cf-ok').onclick = () => { div.remove(); onApprove(); };
+    document.getElementById('ja-cf-no').onclick = () => { div.remove(); onReject(); };
+    document.getElementById('ja-cf-close').onclick = () => { div.remove(); onReject(); };
+    setTimeout(() => { if (document.getElementById('job-auto-confirm') === div) div.remove(); }, 60000);
   },
 
   autoCapture(job) {

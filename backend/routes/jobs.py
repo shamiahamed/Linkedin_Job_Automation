@@ -41,6 +41,10 @@ class ApplyResponse(BaseModel):
     duplicate_email: Optional[bool] = None
 
 
+class JobStatusUpdate(BaseModel):
+    status: str
+
+
 @router.post("/jobs")
 def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
     with _CREATE_LOCK:
@@ -565,6 +569,19 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
     except Exception as e:
         db.rollback()
         return {"success": False, "error": f"Apply failed: {type(e).__name__}: {str(e)}"}
+
+
+@router.patch("/jobs/{job_id}")
+def update_job_status(job_id: int, update: JobStatusUpdate, db: Session = Depends(get_db)):
+    """Move a job between statuses (e.g. reject a staged 'ready_to_send' back to
+    'pending', or restore a duplicate to 'pending')."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    job.status = update.status
+    db.commit()
+    db.refresh(job)
+    return job.to_dict()
 
 
 @router.delete("/jobs/{job_id}")

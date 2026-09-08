@@ -9,161 +9,251 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Job Auto-Apply">
+    <meta name="description" content="Track job captures, confirm applications, and upload resumes from anywhere.">
     <link rel="apple-touch-icon" href="/static/dashboard/icons/icon-192.png">
+    <link rel="icon" href="/static/dashboard/icons/icon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', system-ui, sans-serif; }
-        .badge-email::before { content: "✉️ "; }
-        .badge-phone::before { content: "📞 "; }
-        #toast { transition: all 0.3s; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #eef2f7; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .card { background:#fff; border:1px solid #e5e7eb; border-radius:1rem; box-shadow:0 1px 2px rgba(16,24,40,.06); transition:transform .12s ease, box-shadow .12s ease; }
+        .card:active { transform:scale(.99); }
+        .chip { white-space:nowrap; }
+        .chip.active { background:#0a66c2; color:#fff; border-color:#0a66c2; }
+        .modal { animation: fadeIn .15s ease; }
+        @keyframes fadeIn { from {opacity:0} to {opacity:1} }
+        .modal-panel { animation: slideUp .18s ease; }
+        @keyframes slideUp { from {transform:translateY(16px); opacity:0} to {transform:none; opacity:1} }
+        #toast { transition: all .3s; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <nav class="bg-white shadow-md border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center space-x-2">
+<body class="min-h-screen">
+    <!-- Header -->
+    <header class="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
                 <span class="text-2xl">🎯</span>
-                <h1 class="text-xl font-bold text-gray-800">Job Auto-Apply Dashboard</h1>
+                <h1 class="font-bold text-gray-800 truncate">Job Auto-Apply</h1>
+                <span id="connDot" class="w-2.5 h-2.5 rounded-full bg-green-500 ml-1"></span>
             </div>
-            <div class="flex items-center space-x-4">
-                <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer select-none" title="Send the application email as soon as a job with an email is captured">
-                    <span>Auto-apply</span>
-                    <button onclick="toggleAutoApply()" type="button" id="autoApplyToggle" class="relative w-10 h-6 rounded-full bg-gray-300 transition-colors">
-                        <span class="absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-all"></span>
-                    </button>
-                </label>
-                <span id="backendStatus" class="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700">Connected</span>
-                <button onclick="openSettings()" class="text-gray-500 hover:text-gray-700">⚙️ Settings</button>
+            <div class="flex items-center gap-2">
+                <button id="installBtn" onclick="installPwa()" class="hidden text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">⤓ Install App</button>
+                <button onclick="openResumes()" class="text-xs font-medium text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5">🗂 Resumes</button>
+                <button onclick="openSettings()" title="Settings" class="text-gray-600 hover:bg-gray-100 rounded-lg w-9 h-9 flex items-center justify-center text-lg">⚙️</button>
             </div>
         </div>
-    </nav>
+        <!-- Stats tiles -->
+        <div class="max-w-6xl mx-auto px-4 pb-3 grid grid-cols-3 sm:grid-cols-6 gap-2">
+            <button onclick="setStatus('all')" data-stat="all" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">Total</p>
+                <p id="statTotal" class="text-xl font-bold text-gray-800 leading-tight">-</p>
+            </button>
+            <button onclick="setStatus('ready_to_send')" data-stat="ready_to_send" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">⚠ To confirm</p>
+                <p id="statReady" class="text-xl font-bold text-blue-600 leading-tight">-</p>
+            </button>
+            <button onclick="setStatus('applied')" data-stat="applied" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">Applied</p>
+                <p id="statApplied" class="text-xl font-bold text-green-600 leading-tight">-</p>
+            </button>
+            <button onclick="setStatus('pending')" data-stat="pending" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">Pending</p>
+                <p id="statPending" class="text-xl font-bold text-amber-500 leading-tight">-</p>
+            </button>
+            <button onclick="setStatus('phone_summary_sent')" data-stat="phone_summary_sent" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">📞 Summary</p>
+                <p id="statPhone" class="text-xl font-bold text-orange-500 leading-tight">-</p>
+            </button>
+            <button onclick="setStatus('link_email_sent')" data-stat="link_email_sent" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">🔗 Link</p>
+                <p id="statLink" class="text-xl font-bold text-indigo-600 leading-tight">-</p>
+            </button>
+        </div>
+    </header>
 
-    <!-- Stats Cards -->
-    <section class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
-            <p class="text-sm text-gray-500">Total Jobs</p>
-            <p id="statTotal" class="text-3xl font-bold text-gray-800">-</p>
-        </div>
-        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
-            <p class="text-sm text-gray-500">Applied</p>
-            <p id="statApplied" class="text-3xl font-bold text-green-600">-</p>
-        </div>
-        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
-            <p class="text-sm text-gray-500">Phone Summaries</p>
-            <p id="statPhone" class="text-3xl font-bold text-orange-500">-</p>
-        </div>
-        <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
-            <p class="text-sm text-gray-500">Pending</p>
-            <p id="statPending" class="text-3xl font-bold text-blue-600">-</p>
-        </div>
-    </section>
-
-    <!-- Upload Section -->
-    <section class="max-w-7xl mx-auto px-4 mb-6">
-        <div class="bg-white rounded-lg shadow border border-gray-200 p-5">
-            <h2 class="text-lg font-semibold text-gray-800 mb-3">📸 Upload Job Screenshot (OCR)</h2>
-            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <input id="fileInput" type="file" accept="image/*"
-                       class="block w-full sm:w-auto text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
-                <button onclick="uploadScreenshot()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">
-                    Extract Job Details
-                </button>
-                <span id="ocrStatus" class="text-xs text-gray-500"></span>
+    <main class="max-w-6xl mx-auto px-4 py-4 space-y-4 pb-24">
+        <!-- Offline queue banner -->
+        <div id="offlineBanner" class="hidden card border-l-4 border-l-amber-400 px-4 py-3 bg-amber-50">
+            <div class="flex items-center justify-between gap-3">
+                <p class="text-sm text-amber-800">📶 Offline — <b id="offlineQueued">0</b> capture(s) queued. Will sync automatically when back online.</p>
+                <button onclick="flushQueue(true)" class="text-xs font-medium bg-amber-500 text-white rounded-md px-3 py-1.5">Sync now</button>
             </div>
         </div>
-    </section>
 
-    <!-- Paste & Capture (mobile) -->
-    <section class="max-w-7xl mx-auto px-4 mb-6">
-        <div class="bg-white rounded-lg shadow border border-gray-200 p-5">
-            <h2 class="text-lg font-semibold text-gray-800 mb-1">📋 Paste a LinkedIn Post</h2>
-            <p class="text-xs text-gray-500 mb-3">Copy a job post on your phone and paste it here — no LinkedIn app or extension needed. Works from any browser.</p>
-            <textarea id="pasteText" rows="4" placeholder="Paste the full post text here (role, company, experience, email/phone, apply link)…"
-                      class="w-full text-sm border border-gray-300 rounded-md p-3 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"></textarea>
-            <div class="flex items-center gap-3">
-                <button onclick="captureFromText()" class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 text-sm font-medium">
-                    Capture This Post
-                </button>
-                <span id="pasteStatus" class="text-xs text-gray-500"></span>
+        <!-- Capture -->
+        <section class="card p-4">
+            <div class="flex items-center justify-between">
+                <h2 class="font-semibold text-gray-800 text-base">📸 Capture a job</h2>
+                <button onclick="toggleCapture()" class="text-gray-400 text-xl leading-none" id="captureChevron">−</button>
             </div>
-        </div>
-    </section>
-
-    <!-- Jobs Table -->
-    <section class="max-w-7xl mx-auto px-4 pb-10">
-        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-            <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-gray-800">Captured Jobs</h2>
-                <div class="flex items-center gap-3">
-                    <select id="expFilter" onchange="loadJobs()" class="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white" title="View filter">
-                        <option value="all" selected>All jobs</option>
-                        <option value="0-1">1 Yr or less</option>
-                    </select>
-                    <button onclick="loadJobs()" class="text-blue-600 hover:text-blue-800 text-sm font-medium">🔄 Refresh</button>
+            <div id="captureBody" class="mt-3 space-y-3">
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div class="rounded-xl border border-dashed border-gray-300 p-3">
+                        <p class="text-xs font-medium text-gray-600 mb-2">Screenshot (OCR on device, no upload cost)</p>
+                        <input id="fileInput" type="file" accept="image/*" class="block w-full text-xs text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+                        <button onclick="uploadScreenshot()" class="mt-3 w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">Extract</button>
+                        <span id="ocrStatus" class="block text-xs text-gray-500 mt-2"></span>
+                    </div>
+                    <div>
+                        <p class="text-xs font-medium text-gray-600 mb-2">Pasted LinkedIn post <span class="text-gray-400 font-normal">(works from any browser / share menu)</span></p>
+                        <textarea id="pasteText" rows="3" placeholder="Paste the post: role, company, experience, email/phone…"
+                                  class="w-full text-sm border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-400"></textarea>
+                        <div class="flex items-center gap-3 mt-2">
+                            <button onclick="captureFromText()" class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 text-sm font-medium">Capture</button>
+                            <span id="pasteStatus" class="text-xs text-gray-500"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exp</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            <th class="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="jobsTable" class="bg-white divide-y divide-gray-200">
-                        <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading jobs...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Auth Gate -->
-    <div id="authGate" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl p-6 w-full max-w-sm shadow-2xl">
-            <h2 class="text-lg font-bold text-gray-800 mb-1">🔑 API token required</h2>
-            <p id="authMsg" class="text-xs text-gray-500 mb-3">This server requires a shared token. Enter the API_TOKEN value from the server settings.</p>
-            <input id="tokenInput" type="password" placeholder="API token" autocomplete="off"
-                   class="w-full border border-gray-300 rounded-md px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-            <button onclick="saveToken()" class="w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-700">
-                Save &amp; connect
-            </button>
+        <!-- Filters -->
+        <section class="card p-3 space-y-2">
+            <div class="flex items-center gap-2 flex-wrap">
+                <div class="relative flex-1 min-w-[160px]">
+                    <input id="searchBox" oninput="debouncedLoad()" placeholder="🔍 Search title / company…"
+                           class="w-full text-sm border border-gray-300 rounded-md pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <button onclick="clearSearch()" id="searchClear" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 hidden">✕</button>
+                </div>
+                <select id="expFilter" onchange="loadJobs()" class="text-sm border border-gray-300 rounded-md px-2 py-2 bg-white" title="Experience filter">
+                    <option value="any">Any experience</option>
+                    <option value="0-1">0–1 yr</option>
+                    <option value="1-3">1–3 yr</option>
+                    <option value="3+">3+ yr</option>
+                </select>
+            </div>
+            <div id="statusChips" class="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                <button class="chip active text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="all" onclick="setStatus('all')">All</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="ready_to_send" onclick="setStatus('ready_to_send')">⚠ Confirm</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="pending" onclick="setStatus('pending')">Pending</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="applied" onclick="setStatus('applied')">Applied</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="phone_summary_sent" onclick="setStatus('phone_summary_sent')">📞 Summary</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="link_email_sent" onclick="setStatus('link_email_sent')">🔗 Link</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="duplicate" onclick="setStatus('duplicate')">Duplicate</button>
+                <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="no_contact" onclick="setStatus('no_contact')">No contact</button>
+            </div>
+        </section>
+
+        <!-- Jobs -->
+        <section id="jobsWrap">
+            <div id="jobsLoading" class="card p-10 text-center text-gray-400 text-sm">Loading jobs…</div>
+            <div id="jobsGrid" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+            <div id="jobsEmpty" class="hidden card p-10 text-center text-gray-400 text-sm"></div>
+        </section>
+    </main>
+
+    <!-- Confirm modal -->
+    <div id="confirmModal" class="modal hidden fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="modal-panel bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-bold text-gray-800">Confirm application</h3>
+                <button onclick="closeModal('confirmModal')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 space-y-3">
+                <div>
+                    <p class="text-lg font-semibold text-gray-800 leading-snug" id="cfTitle">-</p>
+                    <p class="text-sm text-gray-500" id="cfCompany">-</p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <div class="bg-gray-50 rounded-lg p-2"><p class="text-[11px] text-gray-400">📧 Email</p><p id="cfEmail" class="font-medium text-blue-700 break-all">-</p></div>
+                    <div class="bg-gray-50 rounded-lg p-2"><p class="text-[11px] text-gray-400">🎯 Title</p><p id="cfStatus" class="font-medium text-gray-700">-</p></div>
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Resume to attach</label>
+                    <select id="cfResume" class="w-full text-sm border border-gray-300 rounded-md px-2 py-2 bg-white"></select>
+                    <p class="text-[11px] text-gray-400 mt-1">Upload more in 🗂 Resumes if your role needs a specific one.</p>
+                </div>
+                <div class="space-y-2 pt-1">
+                    <button onclick="confirmSend()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md py-2.5">Send application ✉️</button>
+                    <button onclick="rejectConfirm()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-md py-2">Don't send — keep as pending</button>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Toast -->
-    <div id="toast" class="hidden fixed bottom-5 right-5 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm z-50"></div>
+    <!-- Resumes modal -->
+    <div id="resumeModal" class="modal hidden fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="modal-panel bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-bold text-gray-800">🗂 Resume library</h3>
+                <button onclick="closeModal('resumeModal')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="flex items-center gap-2">
+                    <input id="resumeFile" type="file" accept="application/pdf,.pdf"
+                           class="flex-1 text-xs text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+                    <button onclick="uploadResume()" class="bg-blue-600 text-white px-3 py-2 rounded-md text-xs font-medium">Upload</button>
+                </div>
+                <p class="text-[11px] text-gray-400 text-center">Stored in the database — survives server restarts and works everywhere.</p>
+                <div id="resumeList" class="space-y-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings modal -->
+    <div id="settingsModal" class="modal hidden fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="modal-panel bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-bold text-gray-800">⚙️ Settings</h3>
+                <button onclick="closeModal('settingsModal')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 space-y-5 text-sm">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <p class="font-medium text-gray-800">Auto-apply</p>
+                        <p class="text-xs text-gray-500">Email jobs (≤1 yr exp) are applied instantly on capture.</p>
+                    </div>
+                    <button onclick="toggleSetting('auto_apply')" id="sw_auto_apply" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
+                        <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+                    </button>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <p class="font-medium text-gray-800">Confirm before sending</p>
+                        <p class="text-xs text-gray-500">Stage every email job for your approval first — nothing leaves until you press Confirm.</p>
+                    </div>
+                    <button onclick="toggleSetting('confirm_before_send')" id="sw_confirm_before_send" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
+                        <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+                    </button>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
+                    <p class="font-medium text-gray-800 mb-1">Profile</p>
+                    <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
+                    <div class="grid grid-cols-1 gap-2">
+                        <input id="pfName" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="Your name">
+                        <input id="pfPhone" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="Phone">
+                        <input id="pfEmail" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="Email">
+                    </div>
+                    <button onclick="saveProfile()" class="mt-2 w-full bg-gray-900 text-white rounded-md py-2 font-medium">Save profile</button>
+                </div>
+                <div class="border-t border-gray-100 pt-3">
+                    <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                        <input type="checkbox" id="autoRefresh" checked class="accent-blue-600"> Auto-refresh every 30s
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="hidden fixed bottom-5 right-5 px-4 py-3 rounded-lg shadow-lg text-sm z-[60]"></div>
 
     <script>
         const API = location.origin;
         let _token = localStorage.getItem('api_token') || '';
+        let _settings = { auto_apply: true, confirm_before_send: false };
+        let _filters = { status: 'all', exp: 'any', q: '' };
+        let _confirmJob = null;
+        let _resumesCache = [];
 
+        /* ============ auth / api ============ */
         function showAuthGate(msg) {
-            const g = document.getElementById('authGate');
-            if (msg) document.getElementById('authMsg').textContent = msg;
-            g.classList.remove('hidden');
-        }
-
-        async function saveToken() {
-            const t = document.getElementById('tokenInput').value.trim();
-            if (!t) { showAuthGate('Token cannot be empty.'); return; }
-            _token = t;
-            localStorage.setItem('api_token', t);
-            document.getElementById('authGate').classList.add('hidden');
-            showToast('Token saved');
-            try {
-                await fetchStats();
-                await loadJobs();
-                await loadSettings();
-            } catch (e) {
-                showAuthGate('Token rejected. Check it matches API_TOKEN on the server.');
-            }
+            const t = prompt(msg || 'Enter the API token for this server:');
+            if (!t) return;
+            _token = t.trim();
+            localStorage.setItem('api_token', _token);
+            init();
         }
 
         async function api(path, opts = {}) {
@@ -171,6 +261,7 @@
             const res = await fetch(API + path, opts);
             if (res.status === 401) {
                 localStorage.removeItem('api_token');
+                _token = '';
                 showAuthGate('Invalid or missing API token.');
                 throw new Error('unauthorized');
             }
@@ -180,56 +271,96 @@
         function showToast(msg, isError = false) {
             const t = document.getElementById('toast');
             t.textContent = (isError ? '❌ ' : '✅ ') + msg;
-            t.className = 'fixed bottom-5 right-5 px-4 py-3 rounded-lg shadow-lg text-sm z-50 ' + (isError ? 'bg-red-600' : 'bg-emerald-600') + ' text-white font-semibold';
-            clearTimeout(t._toastTimer);
-            t._toastTimer = setTimeout(() => t.className = 'hidden', 6000);
+            t.className = 'fixed bottom-5 right-5 px-4 py-3 rounded-lg shadow-lg text-sm z-[60] text-white font-semibold ' + (isError ? 'bg-red-600' : 'bg-emerald-600');
+            clearTimeout(t._timer);
+            t._timer = setTimeout(() => t.className = 'hidden', 6000);
         }
 
+        /* ============ modal helpers ============ */
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); if (id === 'confirmModal') _confirmJob = null; }
+
+        /* ============ stats + jobs ============ */
         async function fetchStats() {
             try {
                 const res = await api('/api/stats');
                 const s = await res.json();
                 document.getElementById('statTotal').textContent = s.total_jobs;
+                document.getElementById('statReady').textContent = s.ready_to_send;
                 document.getElementById('statApplied').textContent = s.applied;
-                document.getElementById('statPhone').textContent = s.phone_summaries_sent;
                 document.getElementById('statPending').textContent = s.pending;
-            } catch (e) {
-                document.getElementById('backendStatus').textContent = 'Offline';
-                document.getElementById('backendStatus').className = 'px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700';
-            }
+                document.getElementById('statPhone').textContent = s.phone_summaries_sent;
+                document.getElementById('statLink').textContent = s.link_emails_sent;
+                const dots = document.querySelectorAll('[data-stat]');
+                dots.forEach(d => { const key = d.dataset.stat; if (d.id !== 'statTotal' && s[key] !== undefined) d.style.display = ''; });
+                setOnline(true);
+            } catch (e) { setOnline(false); }
+        }
+
+        function setOnline(on) {
+            const dot = document.getElementById('connDot');
+            dot.className = 'w-2.5 h-2.5 rounded-full ml-1 ' + (on ? 'bg-green-500' : 'bg-red-500');
+            if (!on && !navigator.onLine) showOffline(true);
+        }
+
+        function setStatus(s) {
+            _filters.status = s;
+            document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === s));
+            document.querySelectorAll('[data-stat]').forEach(c => c.classList.toggle('opacity-40', c.dataset.stat === s));
+            loadJobs();
+        }
+
+        function clearSearch() {
+            _filters.q = '';
+            document.getElementById('searchBox').value = '';
+            document.getElementById('searchClear').classList.add('hidden');
+            loadJobs();
+        }
+
+        let _deb;
+        function debouncedLoad() {
+            clearTimeout(_deb);
+            _deb = setTimeout(() => {
+                _filters.q = document.getElementById('searchBox').value.trim();
+                document.getElementById('searchClear').classList.toggle('hidden', !_filters.q);
+                loadJobs();
+            }, 350);
         }
 
         function contactCell(job) {
-            if (job.emails && job.emails.length) return `<span class="badge-email text-blue-700">${job.emails[0]}</span>`;
-            if (job.phones && job.phones.length) return `<span class="badge-phone text-orange-700">${job.phones[0]}</span>`;
-            return '<span class="text-gray-400">—</span>';
+            const chips = [];
+            (job.emails || []).slice(0, 1).forEach(e => chips.push(`<span class="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-50 rounded-full px-2 py-0.5">✉️ ${esc(e)}</span>`));
+            (job.phones || []).slice(0, 1).forEach(p => chips.push(`<span class="inline-flex items-center gap-1 text-[11px] font-medium text-orange-700 bg-orange-50 rounded-full px-2 py-0.5">📞 ${esc(p)}</span>`));
+            if (!chips.length) return '<span class="text-xs text-gray-400">no contact</span>';
+            return chips.join(' ');
         }
 
         function statusBadge(status) {
             const map = {
                 applied: 'bg-green-100 text-green-700',
+                ready_to_send: 'bg-blue-100 text-blue-700',
                 pending: 'bg-yellow-100 text-yellow-700',
                 phone_summary_sent: 'bg-orange-100 text-orange-700',
-                phone_only: 'bg-purple-100 text-purple-700',
                 no_contact: 'bg-red-100 text-red-700',
                 apply_link: 'bg-teal-100 text-teal-700',
                 link_email_sent: 'bg-indigo-100 text-indigo-700',
                 duplicate: 'bg-amber-100 text-amber-700'
             };
-            return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}">${status.replace(/_/g, ' ')}</span>`;
+            const label = { ready_to_send: '⚠ Confirm', apply_link: 'apply link', link_email_sent: 'link sent',
+                phone_summary_sent: 'phone summary', no_contact: 'no contact' }[status] || status.replace(/_/g, ' ');
+            return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${map[status] || 'bg-gray-100 text-gray-600'}">${label}</span>`;
         }
+
+        function esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
         function expMonths(text) {
             const t = ' ' + String(text || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
             let months = null;
-            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) {
-                months = Math.min(months ?? 12, 12);
-            }
+            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) months = Math.min(months ?? 12, 12);
             const re = /\b(\d{1,2})(?:\s*(?:[-–—to+]\s*)(\d{1,2}))?\s*(?:plus|\+)?\s*(?:years?|yrs?)\b/g;
             let m;
             while ((m = re.exec(t)) !== null) {
-                const a = parseInt(m[1], 10);
-                const b = m[2] ? parseInt(m[2], 10) : a;
+                const a = parseInt(m[1], 10), b = m[2] ? parseInt(m[2], 10) : a;
                 const ub = Math.max(a, b) * 12;
                 months = months === null ? ub : Math.max(months, ub);
             }
@@ -241,245 +372,356 @@
             if (/^fresher/i.test(raw)) return 'Fresher';
             if (raw.trim()) {
                 const m = raw.match(/(\d+(?:\.\d+)?)/);
-                if (m) {
-                    if (m[1] === '0' || /\b0\s*[-–—to]\s*1\b/i.test(raw)) return 'Fresher';
-                    return m[1];
-                }
+                if (m) { if (m[1] === '0' || /\b0\s*[-–—to]\s*1\b/i.test(raw)) return 'Fresher'; return m[1]; }
             }
             const t = ' ' + String(job.description || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
             if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) return 'Fresher';
-            return raw.trim() || '-';
+            return raw.trim() || '·';
         }
 
-        function expMinMonths(text) {
-            const t = ' ' + String(text || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
-            const mins = [];
-            if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) mins.push(12);
-            const re = /\b(\d{1,2})(?:\s*(?:[-–—to+]\s*)(\d{1,2}))?\s*(?:plus|\+)?\s*(?:years?|yrs?)\b/g;
-            let m;
-            while ((m = re.exec(t)) !== null) mins.push(parseInt(m[1], 10) * 12);
-            return mins.length ? Math.min(...mins) : null;
-        }
-
-        function matchesExpView(job) {
-            if (document.getElementById('expFilter').value === 'all') return true;
-            const months = expMinMonths((job.experience || '') + ' ' + (job.description || ''));
-            return months !== null && months <= 12;
+        function timeAgo(iso) {
+            if (!iso) return '';
+            const d = new Date(iso.replace(' ', 'T'));
+            const s = ((Date.now() - d.getTime()) / 1000) | 0;
+            if (s < 60) return 'just now';
+            if (s < 3600) return Math.round(s / 60) + 'm ago';
+            if (s < 86400) return Math.round(s / 3600) + 'h ago';
+            return Math.round(s / 86400) + 'd ago';
         }
 
         async function loadJobs() {
+            let qp = '?';
+            if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
+            if (_filters.exp !== 'any') qp += (qp.length > 1 ? '&' : '') + 'exp=' + encodeURIComponent(_filters.exp);
+            if (_filters.q) qp += (qp.length > 1 ? '&' : '') + 'q=' + encodeURIComponent(_filters.q);
+            document.getElementById('jobsLoading').classList.remove('hidden');
+            document.getElementById('jobsGrid').classList.add('hidden');
             try {
-                const res = await api('/api/jobs');
-                const all = await res.json();
-                const jobs = all.filter(matchesExpView);
-                const tbody = document.getElementById('jobsTable');
-                if (!jobs.length) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No 0-1 year jobs. Switch the filter to "All jobs" to see everything.</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = jobs.map(job => `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-5 py-3 text-sm font-medium text-gray-800 max-w-xs truncate">${job.title || '-'}</td>
-                        <td class="px-5 py-3 text-sm text-gray-600">${job.company || '-'}</td>
-                        <td class="px-5 py-3 text-sm text-gray-600">${job.location || '-'}</td>
-                        <td class="px-5 py-3 text-sm">${contactCell(job)}</td>
-                        <td class="px-5 py-3 text-sm text-gray-600" title="${job.experience ? 'Experience mentioned: ' + job.experience : ''}">${compactExp(job)}</td>
-                        <td class="px-5 py-3">${statusBadge(job.status)}</td>
-                        <td class="px-5 py-3 text-sm">
-${job.apply_link && !(job.emails && job.emails.length) && !(job.phones && job.phones.length)
-    ? `<a href="${job.apply_link}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 font-medium mr-3">🔗 Open</a>`
-    : ''}
-<button onclick="applyJob(${job.id}, '${job.status}')" class="text-blue-600 hover:text-blue-800 font-medium mr-3 ${job.emails && job.emails.length ? '' : (job.phones && job.phones.length ? 'text-orange-600 hover:text-orange-800' : (job.apply_link ? 'hidden' : 'text-gray-400 cursor-not-allowed'))}">
-    ${job.emails && job.emails.length ? '📧 Apply' : (job.phones && job.phones.length ? '📞 Summary' : (job.apply_link ? '' : 'No contact'))}
-</button>
-<button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700">👁 View</button>
-                            <button onclick="deleteJob(${job.id})" class="text-red-500 hover:text-red-700 ml-2" title="Delete">🗑</button>
-                        </td>
-                    </tr>
-                `).join('');
+                const res = await api('/api/jobs' + qp);
+                const jobs = await res.json();
+                renderJobs(jobs);
             } catch (e) {
-                document.getElementById('jobsTable').innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-red-400">Cannot reach backend. Start the server first.</td></tr>';
+                document.getElementById('jobsLoading').classList.add('hidden');
+                const empty = document.getElementById('jobsEmpty');
+                empty.classList.remove('hidden');
+                empty.textContent = 'Cannot reach the backend. Check the token / server.';
             }
+        }
+
+        function renderJobs(jobs) {
+            const grid = document.getElementById('jobsGrid');
+            const loading = document.getElementById('jobsLoading');
+            const empty = document.getElementById('jobsEmpty');
+            loading.classList.add('hidden');
+            if (!jobs.length) {
+                grid.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.textContent = _filters.status === 'all' && !_filters.q
+                    ? 'No jobs captured yet. Capture a LinkedIn post above, or on your phone paste/share a post.'
+                    : 'Nothing matches this filter.';
+                return;
+            }
+            empty.classList.add('hidden');
+            grid.classList.remove('hidden');
+            grid.innerHTML = jobs.map(job => `
+                <div class="card p-4 flex flex-col gap-2 ${job.status === 'ready_to_send' ? 'ring-2 ring-blue-200' : ''}">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <p class="font-semibold text-gray-800 leading-snug">${esc(job.title || 'Untitled')}</p>
+                            <p class="text-sm text-gray-500 truncate">${job.company ? esc(job.company) : '<span class="text-gray-400">unknown company</span>'}${job.location ? ' · ' + esc(job.location) : ''}</p>
+                        </div>
+                        ${statusBadge(job.status)}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5">${contactCell(job)}</div>
+                    <p class="text-xs text-gray-400 flex items-center gap-3">
+                        <span>🎯 ${compactExp(job)}${job.salary ? ' · 💰 ' + esc(job.salary) : ''}</span>
+                        <span>${timeAgo(job.created_at)}</span>
+                    </p>
+                    <div class="flex items-center gap-2 pt-1 flex-wrap">
+                        ${job.status === 'ready_to_send' ?
+                            `<button onclick="openConfirmModal(${job.id})" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md px-3 py-2">Confirm & send ✉️</button>` :
+                            (job.emails && job.emails.length ?
+                                `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 bg-blue-50 rounded-md px-3 py-2">📧 Apply</button>` :
+                                (job.phones && job.phones.length ?
+                                    `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 bg-orange-50 rounded-md px-3 py-2">📞 Summary</button>` : ''))}
+                        ${job.apply_link && !(job.emails && job.emails.length) ? `<a href="${esc(job.apply_link)}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 text-xs font-medium border border-teal-200 bg-teal-50 rounded-md px-3 py-2">🔗 Open link</a>` : ''}
+                        <button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Details">👁</button>
+                        ${job.status === 'duplicate' ? `<button onclick="setJobStatus(${job.id},'pending')" class="text-amber-600 hover:text-amber-800 text-xs font-medium rounded-md px-2 py-2" title="Treat as new opening">↩ Un-dup</button>` : ''}
+                        <button onclick="deleteJob(${job.id})" class="text-red-400 hover:text-red-600 text-xs rounded-md px-2 py-2 ml-auto" title="Delete">🗑</button>
+                    </div>
+                </div>`).join('');
+        }
+
+        async function setJobStatus(id, status) {
+            try {
+                const res = await api('/api/jobs/' + id, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+                if (!res.ok) throw new Error('failed');
+                showToast('Status updated');
+                loadJobs(); fetchStats();
+            } catch (e) { showToast('Update failed', true); }
         }
 
         async function deleteJob(id) {
             if (!confirm('Delete this job permanently?')) return;
             try {
-                const res = await api(`/api/jobs/${id}`, { method: 'DELETE' });
+                const res = await api('/api/jobs/' + id, { method: 'DELETE' });
                 if (!res.ok) { showToast('Delete failed', true); return; }
-                showToast('Job deleted');
-                loadJobs();
-                fetchStats();
-            } catch (e) {
-                showToast('Delete failed', true);
-            }
+                showToast('Job deleted'); loadJobs(); fetchStats();
+            } catch (e) { showToast('Delete failed', true); }
+        }
+
+        function viewJob(id) {
+            api('/api/jobs/' + id).then(r => r.json()).then(job => {
+                const dupNote = job.status === 'duplicate'
+                    ? '\n\n⚠ SAME EMAIL ALREADY RECEIVED AN APPLICATION.\nVerify before re-applying.\n' : '';
+                window.alert(`Position: ${job.title || '-'}\nCompany: ${job.company || '-'}\nLocation: ${job.location || '-'}\nExperience: ${job.experience || '-'}\nEmails: ${(job.emails || []).join(', ') || '-'}\nPhones: ${(job.phones || []).join(', ') || '-'}\nApply Link: ${job.apply_link || '-'}${dupNote}\n\n${(job.description || '').substring(0, 1200)}`);
+            });
+        }
+
+        /* ============ confirm flow ============ */
+        async function openConfirmModal(id) {
+            try {
+                const job = await (await api('/api/jobs/' + id)).json();
+                _confirmJob = job;
+                document.getElementById('cfTitle').textContent = job.title || '-';
+                document.getElementById('cfCompany').textContent = (job.company || 'unknown') + (job.location ? ' · ' + job.location : '');
+                document.getElementById('cfEmail').textContent = (job.emails || [])[0] || '-';
+                document.getElementById('cfStatus').textContent = 'exp ' + compactExp(job);
+                document.getElementById('cfResume').innerHTML = '<option value="auto">Auto-select (default)</option>' +
+                    await resumesOptions();
+                openModal('confirmModal');
+            } catch (e) { showToast('Could not load job', true); }
+        }
+
+        async function resumesOptions() {
+            try {
+                const resumes = await loadResumes();
+                return resumes.map(r => `<option value="${r.id}" ${r.is_default ? 'selected' : ''}>${esc(r.label || r.name)}</option>`).join('');
+            } catch (e) { return ''; }
+        }
+
+        async function confirmSend() {
+            if (!_confirmJob) return;
+            const sel = document.getElementById('cfResume').value;
+            const body = {};
+            if (sel && sel !== 'auto') body.resume_id = parseInt(sel, 10);
+            const btn = document.querySelector('#confirmModal button');
+            btn.disabled = true; btn.textContent = 'Sending…';
+            try {
+                const res = await api(`/api/jobs/${_confirmJob.id}/confirm`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const d = await res.json();
+                if (d.success) showToast(`Application sent to ${d.to_email}`);
+                else {
+                    if (d.duplicate_email && confirm('⚠ This email already got an application.\n\nReally send anyway?')) {
+                        btn.disabled = false; btn.textContent = 'Send application ✉️';
+                        return confirmSendDup(_confirmJob.id, body);
+                    }
+                    showToast((d.error || 'Send failed').replace(/^Error: /, ''), true);
+                }
+                closeModal('confirmModal'); loadJobs(); fetchStats();
+            } catch (e) { showToast('Send failed', true); }
+            btn.disabled = false; btn.textContent = 'Send application ✉️';
+        }
+
+        async function confirmSendDup(id, body) {
+            try {
+                const res = await api('/api/jobs/' + id + '/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({}, body, { confirm_duplicate: true }))
+                });
+                const d = await res.json();
+                if (d.success) showToast('Sent (confirmed duplicate).');
+                else showToast((d.error || 'Send failed').replace(/^Error: /, ''), true);
+                closeModal('confirmModal'); loadJobs(); fetchStats();
+            } catch (e) { showToast('Send failed', true); }
+        }
+
+        async function rejectConfirm() {
+            if (!_confirmJob) return;
+            await setJobStatus(_confirmJob.id, 'pending');
+            closeModal('confirmModal');
         }
 
         async function applyJob(id, status) {
             const alreadySent = (status === 'applied' || status === 'phone_summary_sent');
-            if (alreadySent &&
-                !confirm('This was already sent once. Send again as a follow-up to get the recruiter\'s attention?')) {
-                showToast('Re-send cancelled — nothing sent.', true);
-                return;
+            if (alreadySent && !confirm('Already sent once. Send again as a follow-up?')) {
+                showToast('Cancelled — nothing sent.', true); return;
             }
             const doApply = async (confirmDup) => {
-                const r = await api(`/api/jobs/${id}/apply`, {
+                const r = await api('/api/jobs/' + id + '/apply', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ confirm_duplicate: confirmDup })
                 });
-                let d = null;
-                try { d = r.ok ? await r.json() : null; } catch (e) { d = null; }
+                let d = null; try { d = r.ok ? await r.json() : null; } catch (e) {}
                 return { d, ok: r.ok };
             };
             let { d: data, ok } = await doApply(false);
             if (data && data.duplicate_email) {
                 if (!confirm('⚠ THIS EMAIL ALREADY RECEIVED AN APPLICATION.\n\nVerify this is a genuinely different opening, then send anyway?')) {
-                    showToast('No email sent — cancelled (this email already received an application).', true);
-                    return;
+                    showToast('No email sent — cancelled.', true); return;
                 }
                 ({ d: data, ok } = await doApply(true));
                 if ((data && data.duplicate_email) || (data && data.error)) {
-                    showToast((data && data.error || 'Apply failed').replace(/^Error: /, ''), true);
-                    return;
+                    showToast((data && data.error || 'Apply failed').replace(/^Error: /, ''), true); return;
                 }
             }
             if (data && data.success) {
-                if (data.type === 'email') {
-                    showToast(`Application sent to ${data.to_email}`);
-                } else {
-                    showToast('Phone summary sent to your inbox');
-                }
-                loadJobs();
-                fetchStats();
-            } else if (data) {
-                showToast((data.error || 'Apply failed').replace(/^Error: /, ''), true);
-            } else if (!ok) {
-                showToast('Server error (HTTP request failed)', true);
-            } else {
-                showToast('Unexpected response from server', true);
-            }
+                showToast(data.type === 'email' ? `Application sent to ${data.to_email}` : 'Phone summary sent to your inbox');
+                loadJobs(); fetchStats();
+            } else if (data) showToast((data.error || 'Apply failed').replace(/^Error: /, ''), true);
+            else if (!ok) showToast('Server error (HTTP request failed)', true);
+            else showToast('Unexpected response', true);
         }
 
-        function viewJob(id) {
-            api(`/api/jobs/${id}`).then(r => r.json()).then(job => {
-                const dupNote = job.status === 'duplicate'
-                    ? '\n\n⚠ SAME EMAIL ALREADY RECEIVED AN APPLICATION.\nVerify before re-applying — use Apply only if it\'s a genuinely different opening.\n'
-                    : '';
-                const details = `
-Position: ${job.title || '-'}
-Company: ${job.company || '-'}
-Location: ${job.location || '-'}
-Experience: ${job.experience || '-'}
-Emails: ${(job.emails || []).join(', ') || '-'}
-Phones: ${(job.phones || []).join(', ') || '-'}
-Apply Link: ${job.apply_link || '-'}
-${job.url ? '\nLink: ' + job.url : ''}${dupNote}
-
-${(job.description || '').substring(0, 1000)}`;
-                window.alert(details);
-            });
+        /* ============ resumes ============ */
+        async function loadResumes() {
+            const res = await api('/api/resumes');
+            _resumesCache = await res.json();
+            return _resumesCache;
         }
 
-        async function uploadScreenshot() {
-            const file = document.getElementById('fileInput').files[0];
-            if (!file) { showToast('Select a screenshot first', true); return; }
-            const status = document.getElementById('ocrStatus');
-            status.textContent = 'OCR on device…';
+        async function openResumes() {
+            try {
+                await loadResumes();
+                await renderResumeList();
+                openModal('resumeModal');
+            } catch (e) { showToast('Cannot reach server', true); }
+        }
 
-            // 1) Try in-browser OCR (device does the work — fast on any phone/PC,
-            //    never hits Render's weak free CPU, works for your friend too).
-            let text = '';
-            if (window.Tesseract) {
-                try {
-                    const { data } = await Tesseract.recognize(file, 'eng', {
-                        logger: m => {
-                            if (m.status === 'recognizing text')
-                                status.textContent = 'Reading: ' + Math.round(m.progress * 100) + '%…';
-                        }
-                    });
-                    text = (data.text || '').trim();
-                } catch (e) { status.textContent = 'Device OCR failed, using server…'; }
+        async function renderResumeList() {
+            const wrap = document.getElementById('resumeList');
+            if (!_resumesCache.length) {
+                wrap.innerHTML = '<p class="text-center text-xs text-gray-400 py-4">No uploaded resumes yet — add your PDFs above.</p>';
+                return;
             }
+            wrap.innerHTML = _resumesCache.map(r => `
+                <div class="flex items-center gap-2 border border-gray-200 rounded-lg p-2 ${r.is_default ? 'border-blue-300 bg-blue-50' : ''}">
+                    <span class="text-lg">📄</span>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-gray-800 truncate">${esc(r.label || r.name)}</p>
+                        <p class="text-[11px] text-gray-400 truncate">${esc(r.name)} · ${timeAgo(r.created_at)}${r.is_default ? ' · ⭐ default' : ''}</p>
+                    </div>
+                    <button onclick="setDefaultResume(${r.id})" class="text-[11px] text-blue-600 hover:text-blue-800 font-medium ${r.is_default ? 'opacity-40 pointer-events-none' : ''}">Default</button>
+                    <button onclick="deleteResume(${r.id})" class="text-red-400 hover:text-red-600 text-sm">🗑</button>
+                </div>`).join('');
+        }
 
-            if (text.length >= 30) {
-                // Smart path: AI extraction + same gates as paste (auto-apply email included).
-                try {
-                    const res = await api('/api/jobs/from-text', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text, source: 'ocr_mobile' })
-                    });
-                    const d = await res.json();
-                    if (!res.ok) throw new Error(d.detail || 'Capture failed');
-                    showToast(`Captured: ${d.title} @ ${d.company || 'unknown'} — ${d.status.replace(/_/g, ' ')}`);
-                    document.getElementById('fileInput').value = '';
-                    loadJobs();
-                    fetchStats();
-                    status.textContent = '';
-                    return;
-                } catch (e) {
-                    showToast(e.message || 'Capture failed', true);
-                    status.textContent = '';
-                    return;
-                }
-            }
-
-            // 2) Fallback: server-side Tesseract (small image, bounded budget).
-            status.textContent = 'Processing on server…';
+        async function uploadResume() {
+            const file = document.getElementById('resumeFile').files[0];
+            if (!file) { showToast('Choose a PDF first', true); return; }
+            const label = prompt('Label (e.g. Python Developer):', file.name.replace(/\.pdf$/i, ''));
+            if (label === null) return;
             const fd = new FormData();
             fd.append('file', file);
+            fd.append('label', label.trim());
             try {
-                const res = await api('/api/ocr/upload', { method: 'POST', body: fd });
-                const data = await res.json();
-                if (data.success) {
-                    showToast(`Job "${data.job.title}" extracted from screenshot`);
-                    loadJobs();
-                    fetchStats();
-                } else {
-                    showToast(data.message || 'Could not identify job from screenshot', true);
-                }
-            } catch (e) {
-                showToast('OCR failed. Is Tesseract installed?', true);
-            }
-            status.textContent = '';
+                const res = await api('/api/resumes', { method: 'POST', body: fd });
+                if (!res.ok) throw new Error('upload failed');
+                showToast('Resume uploaded');
+                document.getElementById('resumeFile').value = '';
+                await loadResumes(); await renderResumeList();
+            } catch (e) { showToast('Upload failed', true); }
         }
 
-        function setAutoApplyUI(on) {
-            const t = document.getElementById('autoApplyToggle');
-            t.className = 'relative w-10 h-6 rounded-full transition-colors ' + (on ? 'bg-green-500' : 'bg-gray-300');
-            t.firstElementChild.className = 'absolute left-1 top-1 w-4 h-4 rounded-full bg-white shadow transition-all' + (on ? ' translate-x-4' : '');
+        async function setDefaultResume(id) {
+            try {
+                const res = await api('/api/resumes/' + id, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ make_default: 'true' })
+                });
+                if (!res.ok) throw new Error('failed');
+                showToast('Default resume updated');
+                await loadResumes(); await renderResumeList();
+            } catch (e) { showToast('Update failed', true); }
+        }
+
+        async function deleteResume(id) {
+            if (!confirm('Delete this resume?')) return;
+            try {
+                const res = await api('/api/resumes/' + id, { method: 'DELETE' });
+                if (!res.ok) throw new Error('failed');
+                showToast('Resume deleted');
+                await loadResumes(); await renderResumeList();
+            } catch (e) { showToast('Delete failed', true); }
+        }
+
+        /* ============ settings ============ */
+        function setSwitch(id, on) {
+            const el = document.getElementById(id);
+            el.className = 'shrink-0 w-12 h-7 rounded-full transition-colors relative ' + (on ? 'bg-green-500' : 'bg-gray-300');
+            el.firstElementChild.className = 'absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all' + (on ? ' translate-x-5' : '');
         }
 
         async function loadSettings() {
             try {
-                const res = await api('/api/settings');
-                setAutoApplyUI((await res.json()).auto_apply);
+                const s = await (await api('/api/settings')).json();
+                _settings = Object.assign({}, _settings, s);
+                setSwitch('sw_auto_apply', !!s.auto_apply);
+                setSwitch('sw_confirm_before_send', !!s.confirm_before_send);
             } catch (e) { /* backend offline */ }
         }
 
-        async function toggleAutoApply() {
-            const t = document.getElementById('autoApplyToggle');
-            const next = !t.className.includes('bg-green-500');
+        async function toggleSetting(key) {
+            const next = !_settings[key];
+            _settings[key] = next;
+            setSwitch('sw_' + key, next);
             try {
                 await api('/api/settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ auto_apply: next })
+                    body: JSON.stringify({ [key]: next })
                 });
-            } catch (e) { /* ignore */ }
-            setAutoApplyUI(next);
-            showToast(next ? 'Auto-apply ON — new jobs with an email get applied instantly' : 'Auto-apply OFF');
+                showToast(key === 'auto_apply'
+                    ? (next ? 'Auto-apply ON — new email jobs get applied instantly.' : 'Auto-apply OFF.')
+                    : (next ? 'Confirm mode ON — email jobs are staged for approval.' : 'Confirm mode OFF.'));
+            } catch (e) { showToast('Could not save setting', true); }
+        }
+
+        function openSettings() {
+            const p = JSON.parse(localStorage.getItem('profile') || '{}');
+            document.getElementById('pfName').value = p.name || 'Shamim Ahamed J';
+            document.getElementById('pfPhone').value = p.phone || '9894593190';
+            document.getElementById('pfEmail').value = p.email || 'ahamedshamin5@gmail.com';
+            document.getElementById('autoRefresh').checked = localStorage.getItem('auto_refresh') !== '0';
+            openModal('settingsModal');
+        }
+
+        function saveProfile() {
+            localStorage.setItem('profile', JSON.stringify({
+                name: document.getElementById('pfName').value,
+                phone: document.getElementById('pfPhone').value,
+                email: document.getElementById('pfEmail').value
+            }));
+            showToast('Profile saved locally');
+        }
+
+        /* ============ capture / OCR ============ */
+        function toggleCapture() {
+            const b = document.getElementById('captureBody');
+            const c = document.getElementById('captureChevron');
+            b.classList.toggle('hidden');
+            c.textContent = b.classList.contains('hidden') ? '+' : '−';
         }
 
         async function captureFromText() {
             const text = document.getElementById('pasteText').value.trim();
-            if (text.length < 30) {
-                showToast('Paste more of the post — role, company and contact info', true);
+            if (text.length < 30) { showToast('Paste more of the post — role, company, contact info', true); return; }
+            const st = document.getElementById('pasteStatus');
+            if (!navigator.onLine) {
+                await enqueueOffline(text);
+                st.textContent = 'Queued offline ✓';
                 return;
             }
-            const st = document.getElementById('pasteStatus');
-            st.textContent = 'Analyzing with AI…';
+            st.textContent = 'Analyzing…';
             try {
                 const res = await api('/api/jobs/from-text', {
                     method: 'POST',
@@ -488,37 +730,199 @@ ${(job.description || '').substring(0, 1000)}`;
                 });
                 const d = await res.json();
                 if (!res.ok) throw new Error(d.detail || 'Capture failed');
-                showToast(`Captured: ${d.title} @ ${d.company || 'unknown'} — ${d.status.replace(/_/g, ' ')}`);
+                showToast(statusToast(d));
                 document.getElementById('pasteText').value = '';
-                loadJobs();
-                fetchStats();
-            } catch (e) {
-                showToast(e.message || 'Capture failed. Is the server reachable?', true);
-            }
+                loadJobs(); fetchStats();
+            } catch (e) { showToast(e.message || 'Capture failed. Server reachable?', true); }
             st.textContent = '';
         }
 
-        function openSettings() {
-            const name = prompt('Your name:', 'Shamim Ahamed J');
-            if (name === null) return;
-            const phone = prompt('Your phone:', '9894593190');
-            if (phone === null) return;
-            const email = prompt('Your email:', 'ahamedshamin5@gmail.com');
-            if (email === null) return;
-            localStorage.setItem('profile', JSON.stringify({ name, phone, email }));
-            showToast('Profile saved locally (backend .env is authoritative)');
+        function statusToast(d) {
+            const v = {
+                applied: 'auto-applied ✉️',
+                ready_to_send: 'staged for confirmation ⚠',
+                pending: 'kept as pending',
+                phone_summary_sent: 'phone summary sent to you',
+                link_email_sent: 'apply link emailed to you',
+                duplicate: 'duplicate (already applied)',
+                no_contact: 'no contact found'
+            };
+            return `Captured: ${d.title} @ ${d.company || 'unknown'} — ${v[d.status] || d.status.replace(/_/g, ' ')}`;
         }
 
-        // PWA: installable + offline shell (HTTPS / localhost only)
+        async function uploadScreenshot() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) { showToast('Select a screenshot first', true); return; }
+            const status = document.getElementById('ocrStatus');
+            status.textContent = 'OCR on device…';
+            let text = '';
+            if (window.Tesseract) {
+                try {
+                    const { data } = await Tesseract.recognize(file, 'eng', {
+                        logger: m => { if (m.status === 'recognizing text') status.textContent = 'Reading: ' + Math.round(m.progress * 100) + '%…'; }
+                    });
+                    text = (data.text || '').trim();
+                } catch (e) { status.textContent = 'Device OCR failed, using server…'; }
+            }
+            if (text.length >= 30) {
+                try {
+                    if (!navigator.onLine) { await enqueueOffline(text); status.textContent = 'Queued offline ✓'; return; }
+                    const res = await api('/api/jobs/from-text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, source: 'ocr_mobile' })
+                    });
+                    const d = await res.json();
+                    if (!res.ok) throw new Error(d.detail || 'Capture failed');
+                    showToast(statusToast(d));
+                    document.getElementById('fileInput').value = '';
+                    loadJobs(); fetchStats();
+                } catch (e) { showToast(e.message || 'Capture failed', true); }
+                status.textContent = '';
+                return;
+            }
+            status.textContent = 'Processing on server…';
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await api('/api/ocr/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.success) { showToast(`Job "${data.job.title}" extracted from screenshot`); loadJobs(); fetchStats(); }
+                else showToast(data.message || 'Could not identify job from screenshot', true);
+            } catch (e) { showToast('OCR failed. Is Tesseract installed?', true); }
+            status.textContent = '';
+        }
+
+        /* ============ offline queue (IndexedDB) ============ */
+        const DB_NAME = 'jaa-queue', STORE = 'captures';
+        function idbOpen() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, 1);
+                req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function enqueueOffline(text) {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readwrite');
+                tx.objectStore(STORE).add({ text, ts: Date.now() });
+                tx.oncomplete = () => { updateOfflineUI(); resolve(); };
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+        async function readQueue() {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readonly');
+                const req = tx.objectStore(STORE).getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function clearQueue() {
+            const db = await idbOpen();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readwrite');
+                tx.objectStore(STORE).clear();
+                tx.oncomplete = resolve;
+                tx.onerror = reject;
+            });
+        }
+        function updateOfflineUI() {
+            readQueue().then(items => {
+                const n = items.length;
+                document.getElementById('offlineQueued').textContent = n;
+                document.getElementById('offlineBanner').classList.toggle('hidden', !n);
+            }).catch(() => {});
+        }
+        async function flushQueue(manual = false) {
+            const items = await readQueue();
+            if (!items.length) return;
+            let ok = 0, fail = 0;
+            for (const it of items) {
+                try {
+                    const res = await api('/api/jobs/from-text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: it.text, source: 'mobile_offline' })
+                    });
+                    if (res.ok) { ok++; continue; }
+                    const d = await res.json().catch(() => null);
+                    if (!d || !String(d.detail || '').toLowerCase().includes('short')) fail++;
+                    else ok++; // too-short junk — drop silently
+                } catch (e) { fail++; }
+            }
+            await clearQueue();
+            updateOfflineUI();
+            loadJobs(); fetchStats();
+            showToast(`Synced ${ok} offline capture(s)${fail ? `, ${fail} still failing` : ''}`, fail > 0);
+        }
+
+        /* ============ PWA ============ */
+        let _deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            _deferredPrompt = e;
+            document.getElementById('installBtn').classList.remove('hidden');
+        });
+        async function installPwa() {
+            if (!_deferredPrompt) { showToast('Open in browser menu → "Install app"', true); return; }
+            _deferredPrompt.prompt();
+            await _deferredPrompt.userChoice;
+            _deferredPrompt = null;
+            document.getElementById('installBtn').classList.add('hidden');
+        }
+
+        function handleShareTarget() {
+            const params = new URLSearchParams(location.search);
+            if (params.get('shared')) {
+                const text = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n');
+                if (text) {
+                    document.getElementById('pasteText').value = text;
+                    const st = document.getElementById('pasteStatus');
+                    st.textContent = 'Shared text loaded — tap Capture.';
+                    if (text.length >= 30) { captureFromText(); }
+                }
+            }
+        }
+
+        /* ============ init ============ */
+        function setAutoRefreshUI() {
+            const on = localStorage.getItem('auto_refresh') !== '0';
+            document.getElementById('autoRefresh').checked = on;
+            return on;
+        }
+        let _int = 0;
+        document.getElementById('autoRefresh').addEventListener('change', () => {
+            localStorage.setItem('auto_refresh', document.getElementById('autoRefresh').checked ? '1' : '0');
+            configureRefresh();
+        });
+        function configureRefresh() {
+            clearInterval(_int);
+            if (localStorage.getItem('auto_refresh') !== '0') {
+                _int = setInterval(() => { if (navigator.onLine) { fetchStats(); loadJobs(); } }, 30000);
+            }
+        }
+        window.addEventListener('online', () => { setOnline(true); flushQueue(); });
+        window.addEventListener('offline', () => setOnline(false));
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { fetchStats(); loadJobs(); updateOfflineUI(); } });
+
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-            navigator.serviceWorker.register('/static/dashboard/service-worker.js').catch(() => {});
+            navigator.serviceWorker.register('/static/dashboard/service-worker.js').then(() => navigator.serviceWorker.ready).catch(() => {});
         }
 
-        // Init
-        fetchStats();
-        loadJobs();
-        loadSettings();
-        setInterval(() => { fetchStats(); loadJobs(); }, 30000);
+        async function init() {
+            if (!_token) { showAuthGate('Enter the API token:'); return; }
+            updateOfflineUI();
+            fetchStats();
+            loadJobs();
+            loadSettings();
+            configureRefresh();
+            handleShareTarget();
+        }
+        init();
     </script>
 </body>
 </html>
