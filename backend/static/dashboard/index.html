@@ -30,6 +30,13 @@
     </style>
 </head>
 <body class="min-h-screen">
+    <!-- Auth banner (non-intrusive; no scary popups) -->
+    <div id="authBanner" class="hidden bg-red-50 border-b border-red-200">
+        <div class="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
+            <p class="text-sm text-red-700" id="authBannerMsg"></p>
+            <button onclick="openToken()" class="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-md px-3 py-1.5 whitespace-nowrap">Set API token</button>
+        </div>
+    </div>
     <!-- Header -->
     <header class="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-200">
         <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
@@ -219,6 +226,17 @@
                     </button>
                 </div>
                 <div class="border-t border-gray-100 pt-4">
+                    <p class="font-medium text-gray-800 mb-1">API token</p>
+                    <p class="text-xs text-gray-500 mb-2">Shared key for this server (same as .env / Render API_TOKEN).</p>
+                    <div class="flex items-center gap-2">
+                        <input id="tokenInput" type="password" placeholder="API token" autocomplete="off"
+                               onkeydown="if(event.key==='Enter')saveTokenInput()"
+                               class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm">
+                        <button onclick="saveTokenInput()" class="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm font-medium shrink-0">Save</button>
+                    </div>
+                    <p id="tokenStatus" class="text-xs mt-1"></p>
+                </div>
+                <div class="border-t border-gray-100 pt-4">
                     <p class="font-medium text-gray-800 mb-1">Profile</p>
                     <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
                     <div class="grid grid-cols-1 gap-2">
@@ -248,12 +266,40 @@
         let _resumesCache = [];
 
         /* ============ auth / api ============ */
-        function showAuthGate(msg) {
-            const t = prompt(msg || 'Enter the API token for this server:');
-            if (!t) return;
-            _token = t.trim();
-            localStorage.setItem('api_token', _token);
-            init();
+        function showAuthBanner(msg) {
+            document.getElementById('authBanner').classList.remove('hidden');
+            document.getElementById('authBannerMsg').textContent = msg || 'Enter the API token to connect.';
+        }
+
+        function hideAuthBanner() {
+            document.getElementById('authBanner').classList.add('hidden');
+        }
+
+        function openToken() {
+            document.getElementById('tokenInput').value = _token || '';
+            document.getElementById('tokenStatus').textContent = '';
+            openModal('settingsModal');
+            setTimeout(() => document.getElementById('tokenInput').focus(), 100);
+        }
+
+        async function saveTokenInput() {
+            const t = document.getElementById('tokenInput').value.trim();
+            if (!t) { showToast('Token cannot be empty', true); return; }
+            const st = document.getElementById('tokenStatus');
+            st.textContent = 'Checking…';
+            try {
+                const res = await fetch(API + '/api/stats', { headers: { 'X-API-Key': t } });
+                if (!res.ok) throw new Error('rejected');
+                _token = t;
+                localStorage.setItem('api_token', _token);
+                hideAuthBanner();
+                st.textContent = '✓ Connected';
+                showToast('Token saved & connected');
+                fetchStats(); loadJobs(); loadSettings();
+            } catch (e) {
+                st.textContent = '✗ Rejected — check the token in .env / Render env';
+                showToast('Token rejected', true);
+            }
         }
 
         async function api(path, opts = {}) {
@@ -262,7 +308,7 @@
             if (res.status === 401) {
                 localStorage.removeItem('api_token');
                 _token = '';
-                showAuthGate('Invalid or missing API token.');
+                showAuthBanner('Invalid or missing API token — add it in Settings below.');
                 throw new Error('unauthorized');
             }
             return res;
@@ -692,6 +738,8 @@
             document.getElementById('pfPhone').value = p.phone || '9894593190';
             document.getElementById('pfEmail').value = p.email || 'ahamedshamin5@gmail.com';
             document.getElementById('autoRefresh').checked = localStorage.getItem('auto_refresh') !== '0';
+            document.getElementById('tokenInput').value = _token || '';
+            document.getElementById('tokenStatus').textContent = '';
             openModal('settingsModal');
         }
 
@@ -914,7 +962,8 @@
         }
 
         async function init() {
-            if (!_token) { showAuthGate('Enter the API token:'); return; }
+            if (_token) { hideAuthBanner(); }
+            else { showAuthBanner('Enter the API token to connect.'); }
             updateOfflineUI();
             fetchStats();
             loadJobs();
