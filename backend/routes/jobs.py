@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import re
 import threading
 from database import get_db
-from models import Job, Application, Setting
+from models import Job, Application, Setting, Resume
 from services.email_builder import EmailBuilder
 
 
@@ -175,10 +175,46 @@ def create_job_from_text(payload: TextCapture, db: Session = Depends(get_db)):
     )
 
 
+EXPERIENCE_BUCKETS = {"0-1": (0, 12), "1-3": (13, 36), "3+": (37, None)}
+
+
 @router.get("/jobs")
-def list_jobs(db: Session = Depends(get_db)):
+def list_jobs(
+    status: Optional[str] = None,
+    exp: Optional[str] = None,
+    source: Optional[str] = None,
+    q: Optional[str] = None,
+    since: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     cleanup_no_contact(db)
-    jobs = db.query(Job).order_by(Job.created_at.desc()).all()
+    query = db.query(Job).order_by(Job.created_at.desc())
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            query = query.filter(Job.status.in_(statuses))
+    if source:
+        query = query.filter(Job.source == source)
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+            query = query.filter(Job.created_at >= since_dt)
+        except ValueError:
+            pass
+    jobs = query.all()
+    if q:
+        ql = q.lower()
+        jobs = [j for j in jobs if ql in (j.title or "").lower() or ql in (j.company or "").lower()]
+    if exp and exp != "any":
+        lo, hi = EXPERIENCE_BUCKETS.get(exp, (None, None))
+        if lo is not None or hi is not None:
+            jobs = [
+                j for j in jobs
+                if (lambda m: m is not None
+                    and (lo is None or m >= lo)
+                    and (hi is None or m <= hi))(
+                    _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}"))
+            ]
     return [j.to_dict() for j in jobs]
 
 
@@ -324,18 +360,21 @@ def _set_setting(db: Session, key: str, value: str) -> None:
 
 def _auto_apply_if_enabled(db: Session, job: Job) -> None:
     """On capture (when auto-apply is on):
-    - email present  -> application emailed automatically ONLY when the role
+    - email present -> application emailed automatically ONLY when the role
       starts at <=1 year experience (0-1, 1, 1-2, 1-3, fresher). Roles like
       2+ / 3-5 years stay 'pending' for the user to apply manually.
-    - phone present  -> call-summary emailed to the user's own inbox so they can call
+    - confirm_before_send ON -> confident email jobs are staged as
+      'ready_to_send' and never emailed until the user presses Confirm.
+    - phone present -> call-summary emailed to the user's own inbox so they can call
     - apply link only -> the apply link is emailed to the user's own inbox so the
       user opens and APPLIES it themselves (no auto-open of browser tabs)"""
     if _get_setting(db, "auto_apply", "1") not in ("1", "true", "yes"):
         return
+    confirm = _get_setting(db, "confirm_before_send", "0") in ("1", "true", "yes")
     # Safety: a junk title/company capture must NOT get an auto-email (empty or
     # wrong body = instant rejection). Unconfident posts stay pending for review.
-    confident = _confident(job)
     try:
+        # 1. Phone job -> call-summary to the user's own inbox (safe, always auto).
         if job.phones and not _has_sent(db, job.id, "phone_summary"):
             summary = EmailBuilder(job).send_phone_summary()
             if summary.get("success"):
@@ -346,12 +385,22 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
                     type="phone_summary",
                     status="sent",
                 ))
-        if not confident:
-            if job.emails and not job.status:
+                # Phone-only job whose summary already went out -> reflect it.
+                if not job.emails and not job.apply_link and job.status in (None, "", "pending"):
+                    job.status = "phone_summary_sent"
+        if not _confident(job):
+            if job.emails and job.status in (None, "", "pending"):
                 job.status = "pending"
             return
+
         min_months = _exp_min_months(f"{job.experience or ''} {_feed_body(job.description or '')}")
-        if job.emails and min_months is not None and min_months <= 12 and not _has_sent(db, job.id, "email"):
+        eligible = bool(job.emails) and min_months is not None and min_months <= 12
+
+        if confirm and job.emails and not _has_sent(db, job.id, "email"):
+            # Confirm-before-send: stage it for the dashboard, don't email yet.
+            job.status = "ready_to_send"
+            return
+        if job.emails and eligible and not _has_sent(db, job.id, "email"):
             if _email_previously_sent(db, job.emails[0]):
                 # Same recruiter/company email already got an application -> manual verify only.
                 job.status = "duplicate"
@@ -387,14 +436,19 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
 
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
-    return {"auto_apply": _get_setting(db, "auto_apply", "1") == "1"}
+    return {
+        "auto_apply": _get_setting(db, "auto_apply", "1") == "1",
+        "confirm_before_send": _get_setting(db, "confirm_before_send", "0") in ("1", "true", "yes"),
+    }
 
 
 @router.put("/settings")
 def update_settings(payload: dict, db: Session = Depends(get_db)):
     _set_setting(db, "auto_apply", "1" if payload.get("auto_apply") else "0")
+    if payload.get("confirm_before_send") is not None:
+        _set_setting(db, "confirm_before_send", "1" if payload.get("confirm_before_send") else "0")
     db.commit()
-    return {"auto_apply": payload.get("auto_apply", False)}
+    return get_settings(db)
 
 
 @router.get("/jobs/{job_id}")
@@ -403,6 +457,15 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found")
     return job.to_dict()
+
+
+def _resolve_resume_override(db: Session, resume_id) -> Optional[dict]:
+    """Turn an uploaded-resume id into the attachment payload {name, data(base64)}
+    the EmailBuilder can attach. None -> auto-select from the resumes/ folder."""
+    if not resume_id:
+        return None
+    row = db.query(Resume).filter(Resume.id == int(resume_id)).first()
+    return {"name": row.name, "data": row.data} if row else None
 
 
 @router.post("/jobs/{job_id}/apply", response_model=ApplyResponse)
@@ -414,7 +477,8 @@ def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = 
     payload = payload or {}
 
     try:
-        builder = EmailBuilder(job)
+        resume_override = _resolve_resume_override(db, payload.get("resume_id"))
+        builder = EmailBuilder(job, resume_override=resume_override)
 
         if job.emails:
             # Manual apply = deliberate; allow re-send as a follow-up. But if this
@@ -453,6 +517,46 @@ def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = 
                 email_sent_to=None,
                 email_response=result.get("message_id"),
                 type="phone_summary",
+                status="sent",
+            ))
+            db.commit()
+            return result
+        return result
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": f"Apply failed: {type(e).__name__}: {str(e)}"}
+
+
+@router.post("/jobs/{job_id}/confirm", response_model=ApplyResponse)
+def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    """User pressed 'Confirm' on the dashboard for a staged 'ready_to_send' job.
+    Sends the application email (optionally with a specific uploaded resume and
+    a manual resume-pin) and marks the job applied."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if not job.emails:
+        raise HTTPException(400, "This job has no email contact to confirm.")
+    payload = payload or {}
+    try:
+        resume_override = _resolve_resume_override(db, payload.get("resume_id"))
+        resume_pin = payload.get("resume_pin")
+        builder = EmailBuilder(job, resume_override=resume_override, resume_pin=resume_pin)
+        if _email_previously_sent(db, job.emails[0]) and not payload.get("confirm_duplicate"):
+            return {
+                "success": False,
+                "duplicate_email": True,
+                "error": "This contact email already received an application. Confirm to send anyway.",
+            }
+        result = builder.send_application()
+        if result.get("success"):
+            job.status = "applied"
+            db.add(Application(
+                job_id=job.id,
+                resume_used=result.get("resume_used"),
+                email_sent_to=result.get("to_email"),
+                email_response=result.get("message_id"),
+                type="email",
                 status="sent",
             ))
             db.commit()

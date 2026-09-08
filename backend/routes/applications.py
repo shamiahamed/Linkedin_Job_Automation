@@ -52,16 +52,20 @@ def get_stats(db: Session = Depends(get_db)):
     total_jobs = db.query(Job).count()
     applied = db.query(Job).filter(Job.status == "applied").count()
     pending = db.query(Job).filter(Job.status == "pending").count()
+    ready_to_send = db.query(Job).filter(Job.status == "ready_to_send").count()
     no_contact = db.query(Job).filter(Job.status == "no_contact").count()
     duplicate = db.query(Job).filter(Job.status == "duplicate").count()
     summary_sent = db.query(Job).filter(Job.status == "phone_summary_sent").count()
+    link_sent = db.query(Job).filter(Job.status == "link_email_sent").count()
 
     return {
         "total_jobs": total_jobs,
         "applied": applied,
         "pending": pending,
+        "ready_to_send": ready_to_send,
         "no_contact": no_contact,
         "duplicate": duplicate,
         "phone_summaries_sent": summary_sent,
+        "link_emails_sent": link_sent,
         "phone_only": no_contact,
     }

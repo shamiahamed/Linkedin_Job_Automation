@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from config import Config
 from database import Base, engine
 from security import require_api_token
-from routes import jobs, applications, email_routes
+from routes import jobs, applications, email_routes, resumes
 
 
 # Create tables on startup — never crash a worker if the DB is cold/ waking
@@ -62,6 +62,7 @@ _AUTH = [Depends(require_api_token)]
 app.include_router(jobs.router, dependencies=_AUTH)
 app.include_router(applications.router, dependencies=_AUTH)
 app.include_router(email_routes.router, dependencies=_AUTH)
+app.include_router(resumes.router, dependencies=_AUTH)
 
 from fastapi.responses import RedirectResponse
 

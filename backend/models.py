@@ -76,3 +76,28 @@ class Setting(Base):
     key = Column(String(50), nullable=False, unique=True)
     value = Column(String(255), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Resume(Base):
+    """Uploaded resume files stored as base64 data (DB-backed so they survive
+    both local SQLite and the stateless Render/Neon deployment)."""
+
+    __tablename__ = "resumes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    data = Column(Text, nullable=False)  # base64-encoded file bytes
+    mime = Column(String(50), default="application/pdf")
+    label = Column(String(255), nullable=True)
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "mime": self.mime,
+            "label": self.label,
+            "is_default": self.is_default,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

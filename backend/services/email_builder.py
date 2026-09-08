@@ -9,8 +9,12 @@ from services.resume_selector import ResumeSelector
 
 
 class EmailBuilder:
-    def __init__(self, job):
+    def __init__(self, job, resume_override: dict = None, resume_pin: str = None):
+        """resume_override: {'name': str, 'data': base64-str} from an uploaded Resume row.
+        resume_pin: exact filename from the resumes/ folder to force for this job."""
         self.job = job
+        self.resume_override = resume_override
+        self.resume_pin = resume_pin
         self.template_env = Environment(loader=FileSystemLoader(Config.TEMPLATES_DIR))
         self.sender = EmailSender()
         self.selector = ResumeSelector()
@@ -114,9 +118,18 @@ class EmailBuilder:
                 "type": "phone_only",
             }
 
-        resume_file = self.selector.select_for_job(self.job.title, self.job.description)
+        resume_file = self.resume_pin or self.selector.select_for_job(self.job.title, self.job.description)
         attachments = []
-        if resume_file:
+        if self.resume_override:
+            # Uploaded resume stored in the DB -> attach its bytes directly.
+            import base64
+
+            attachments.append({
+                "content": self.resume_override["data"],
+                "name": self.resume_override["name"],
+            })
+            resume_file = self.resume_override["name"]
+        elif resume_file:
             att = self.attachment_from_resume(resume_file)
             if att:
                 attachments.append(att)
