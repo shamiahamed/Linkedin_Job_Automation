@@ -1,12 +1,18 @@
 import base64
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from sqlalchemy.orm import Session
 from typing import Optional
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from database import get_db
 from models import Resume
 
 
 router = APIRouter(prefix="/api", tags=["resumes"])
+
+
+class ResumeUpdate(BaseModel):
+    label: Optional[str] = None
+    make_default: Optional[str] = "false"
 
 
 @router.get("/resumes")
@@ -49,18 +55,13 @@ def upload_resume(
 
 
 @router.put("/resumes/{resume_id}")
-def update_resume(
-    resume_id: int,
-    label: Optional[str] = None,
-    make_default: Optional[str] = "false",
-    db: Session = Depends(get_db),
-):
+def update_resume(resume_id: int, update: ResumeUpdate = Body(...), db: Session = Depends(get_db)):
     row = db.query(Resume).filter(Resume.id == resume_id).first()
     if not row:
         raise HTTPException(404, "Resume not found")
-    if label is not None:
-        row.label = label or None
-    if make_default.lower() in ("true", "1"):
+    if update.label is not None:
+        row.label = update.label or None
+    if (update.make_default or "false").lower() in ("true", "1"):
         db.query(Resume).update({Resume.is_default: False})
         row.is_default = True
     db.commit()
