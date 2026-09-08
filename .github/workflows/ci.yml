@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile all Python
+        run: python -m compileall . -q
+      - name: Smoke test (import + health + settings against SQLite)
+        run: |
+          python - <<'EOF'
+          import os, tempfile
+          os.environ["DATABASE_URL"] = "sqlite:///" + tempfile.mktemp(".db")
+          os.environ["DEBUG"] = "false"
+          from fastapi.testclient import TestClient
+          from main import app
+          c = TestClient(app)
+          assert c.get("/health").json()["status"] == "ok"
+          r = c.get("/api/settings")
+          assert r.status_code == 200, r.text
+          assert "confirm_before_send" in r.json()
+          up = c.post("/api/resumes", files={"file": ("t.pdf", b"%PDF-1.4 x", "application/pdf")})
+          assert up.status_code == 200, up.text
+          rid = up.json()["id"]
+          assert c.delete(f"/api/resumes/{rid}").status_code == 200
+          print("SMOKE OK")
+          EOF
+
+  extension:
+    name: Extension syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: node --check
+        run: |
+          node --check extension/content.js
+          node --check extension/background.js
