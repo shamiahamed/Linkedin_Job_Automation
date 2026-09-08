@@ -109,8 +109,25 @@ class EmailBuilder:
             "name": path.name,
         }
 
+    def _default_db_resume(self):
+        """Return the uploaded resume flagged is_default (DB-backed) if any."""
+        try:
+            from database import SessionLocal
+            from models import Resume
+
+            db = SessionLocal()
+            try:
+                row = db.query(Resume).filter(Resume.is_default == True).first()
+                return {"name": row.name, "data": row.data} if row else None
+            finally:
+                db.close()
+        except Exception:
+            return None
+
     def send_application(self) -> dict:
-        """Send an application email to the first job email, if present."""
+        """Send an application email to the first job email, if present.
+        Resume precedence: explicit upload (resume_id) -> pinned folder file ->
+        uploaded default resume -> automatic folder selection."""
         if not self.job.emails:
             return {
                 "success": False,
@@ -118,10 +135,10 @@ class EmailBuilder:
                 "type": "phone_only",
             }
 
-        resume_file = self.resume_pin or self.selector.select_for_job(self.job.title, self.job.description)
+        resume_file = None
         attachments = []
         if self.resume_override:
-            # Uploaded resume stored in the DB -> attach its bytes directly.
+            # Explicit uploaded-resume chosen for this job.
             import base64
 
             attachments.append({
@@ -129,10 +146,23 @@ class EmailBuilder:
                 "name": self.resume_override["name"],
             })
             resume_file = self.resume_override["name"]
-        elif resume_file:
-            att = self.attachment_from_resume(resume_file)
+        elif self.resume_pin:
+            att = self.attachment_from_resume(self.resume_pin)
             if att:
                 attachments.append(att)
+                resume_file = self.resume_pin
+        else:
+            default = self._default_db_resume()
+            if default:
+                attachments.append({"content": default["data"], "name": default["name"]})
+                resume_file = default["name"]
+            else:
+                picked = self.selector.select_for_job(self.job.title, self.job.description)
+                if picked:
+                    att = self.attachment_from_resume(picked)
+                    if att:
+                        attachments.append(att)
+                        resume_file = picked
 
         subject = f"Application for {self.job.title} - {Config.YOUR_NAME}"
         html = self.build_cover_letter_html()
