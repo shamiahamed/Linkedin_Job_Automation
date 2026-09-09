@@ -30,11 +30,29 @@
     </style>
 </head>
 <body class="min-h-screen">
-    <!-- Auth banner (non-intrusive; no scary popups) -->
-    <div id="authBanner" class="hidden bg-red-50 border-b border-red-200">
-        <div class="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
-            <p class="text-sm text-red-700" id="authBannerMsg"></p>
-            <button onclick="openToken()" class="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-md px-3 py-1.5 whitespace-nowrap">Set API token</button>
+    <!-- Personal login screen (replaces the raw API-token prompt) -->
+    <div id="loginView" class="hidden fixed inset-0 z-50 bg-gray-50 flex items-center justify-center p-6">
+        <div class="w-full max-w-sm card p-6">
+            <div class="text-center mb-5">
+                <span class="text-3xl">🎯</span>
+                <h2 class="font-bold text-gray-800 text-lg mt-2">Job Auto-Apply</h2>
+                <p class="text-sm text-gray-500">Personal dashboard — sign in</p>
+            </div>
+            <form onsubmit="doLogin(event)" class="space-y-3">
+                <div>
+                    <label class="text-xs font-medium text-gray-600">Username</label>
+                    <input id="loginUser" type="text" autocomplete="username" required
+                           class="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600">Password</label>
+                    <input id="loginPass" type="password" autocomplete="current-password" required
+                           class="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <p id="loginError" class="hidden text-xs text-red-600"></p>
+                <button type="submit" id="loginBtn"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-md py-2 text-sm font-medium">Sign in</button>
+            </form>
         </div>
     </div>
     <!-- Header -->
@@ -226,17 +244,6 @@
                     </button>
                 </div>
                 <div class="border-t border-gray-100 pt-4">
-                    <p class="font-medium text-gray-800 mb-1">API token</p>
-                    <p class="text-xs text-gray-500 mb-2">Shared key for this server (same as .env / Render API_TOKEN).</p>
-                    <div class="flex items-center gap-2">
-                        <input id="tokenInput" type="password" placeholder="API token" autocomplete="off"
-                               onkeydown="if(event.key==='Enter')saveTokenInput()"
-                               class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm">
-                        <button onclick="saveTokenInput()" class="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm font-medium shrink-0">Save</button>
-                    </div>
-                    <p id="tokenStatus" class="text-xs mt-1"></p>
-                </div>
-                <div class="border-t border-gray-100 pt-4">
                     <p class="font-medium text-gray-800 mb-1">Profile</p>
                     <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
                     <div class="grid grid-cols-1 gap-2">
@@ -251,6 +258,9 @@
                         <input type="checkbox" id="autoRefresh" checked class="accent-blue-600"> Auto-refresh every 30s
                     </label>
                 </div>
+                <div class="border-t border-gray-100 pt-3">
+                    <button onclick="doLogout()" class="w-full bg-red-50 text-red-700 border border-red-200 rounded-md py-2 text-sm font-medium">Sign out</button>
+                </div>
             </div>
         </div>
     </div>
@@ -259,58 +269,59 @@
 
     <script>
         const API = location.origin;
-        let _token = localStorage.getItem('api_token') || '';
         let _settings = { auto_apply: true, confirm_before_send: false };
         let _filters = { status: 'all', exp: 'any', q: '' };
         let _confirmJob = null;
         let _resumesCache = [];
 
         /* ============ auth / api ============ */
-        function showAuthBanner(msg) {
-            document.getElementById('authBanner').classList.remove('hidden');
-            document.getElementById('authBannerMsg').textContent = msg || 'Enter the API token to connect.';
+        function showLogin() {
+            document.getElementById('loginView').classList.remove('hidden');
+            document.getElementById('loginError').classList.add('hidden');
+            setTimeout(() => document.getElementById('loginUser').focus(), 100);
         }
 
-        function hideAuthBanner() {
-            document.getElementById('authBanner').classList.add('hidden');
+        function hideLogin() {
+            document.getElementById('loginView').classList.add('hidden');
         }
 
-        function openToken() {
-            document.getElementById('tokenInput').value = _token || '';
-            document.getElementById('tokenStatus').textContent = '';
-            openModal('settingsModal');
-            setTimeout(() => document.getElementById('tokenInput').focus(), 100);
-        }
-
-        async function saveTokenInput() {
-            const t = document.getElementById('tokenInput').value.trim();
-            if (!t) { showToast('Token cannot be empty', true); return; }
-            const st = document.getElementById('tokenStatus');
-            st.textContent = 'Checking…';
+        async function doLogin(ev) {
+            ev && ev.preventDefault();
+            const btn = document.getElementById('loginBtn');
+            const err = document.getElementById('loginError');
+            btn.disabled = true; btn.textContent = 'Signing in…';
+            err.classList.add('hidden');
             try {
-                const res = await fetch(API + '/api/stats', { headers: { 'X-API-Key': t } });
-                if (!res.ok) throw new Error('rejected');
-                _token = t;
-                localStorage.setItem('api_token', _token);
-                hideAuthBanner();
-                st.textContent = '✓ Connected';
-                showToast('Token saved & connected');
+                const res = await fetch(API + '/api/auth/login', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('loginUser').value.trim(),
+                        password: document.getElementById('loginPass').value
+                    })
+                });
+                if (!res.ok) throw new Error('Invalid username or password');
+                hideLogin();
+                showToast('Signed in');
                 fetchStats(); loadJobs(); loadSettings();
             } catch (e) {
-                st.textContent = '✗ Rejected — check the token in .env / Render env';
-                showToast('Token rejected', true);
+                err.textContent = e.message || 'Sign in failed';
+                err.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.textContent = 'Sign in';
             }
+        }
+
+        async function doLogout() {
+            try { await fetch(API + '/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
+            window.location.reload();
         }
 
         async function api(path, opts = {}) {
-            opts.headers = Object.assign({}, opts.headers || {}, _token ? { 'X-API-Key': _token } : {});
+            opts.credentials = 'same-origin';
             const res = await fetch(API + path, opts);
-            if (res.status === 401) {
-                localStorage.removeItem('api_token');
-                _token = '';
-                showAuthBanner('Invalid or missing API token — add it in Settings below.');
-                throw new Error('unauthorized');
-            }
+            if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
             return res;
         }
 
@@ -738,8 +749,6 @@
             document.getElementById('pfPhone').value = p.phone || '9894593190';
             document.getElementById('pfEmail').value = p.email || 'ahamedshamin5@gmail.com';
             document.getElementById('autoRefresh').checked = localStorage.getItem('auto_refresh') !== '0';
-            document.getElementById('tokenInput').value = _token || '';
-            document.getElementById('tokenStatus').textContent = '';
             openModal('settingsModal');
         }
 
@@ -962,14 +971,20 @@
         }
 
         async function init() {
-            if (_token) { hideAuthBanner(); }
-            else { showAuthBanner('Enter the API token to connect.'); }
             updateOfflineUI();
-            fetchStats();
-            loadJobs();
-            loadSettings();
             configureRefresh();
             handleShareTarget();
+            try {
+                const me = await fetch(API + '/api/auth/me', { credentials: 'same-origin' });
+                const j = await me.json();
+                if (j.authenticated) {
+                    fetchStats(); loadJobs(); loadSettings();
+                } else {
+                    showLogin();
+                }
+            } catch (e) {
+                showLogin();
+            }
         }
         init();
     </script>

@@ -79,8 +79,14 @@ for a public demo / "wow" walkthrough.
 - Folder auto-selection (`backend/services/resume_selector.py`) still works as a
   fallback when no upload is chosen and `backend/resumes/` is populated.
 
-## API (all require `X-API-Key` / Bearer `API_TOKEN`)
+## API (token OR login session)
+Routes authenticate via the `X-API-Key` / Bearer `API_TOKEN` header (extension,
+scripts) **or** the dashboard's login session cookie. Public: `/health`,
+`/api/auth/login`, `/api/auth/me`.
 ```
+POST /api/auth/login      username+password -> HttpOnly session cookie
+POST /api/auth/logout     clears the session
+GET  /api/auth/me        {authenticated:true|false}
 GET  /api/jobs[?status=…&exp=0-1|1-3|3+&source=…&q=…&since=…]   list + filter
 POST /api/jobs                    extension capture
 POST /api/jobs/from-text          AI extraction from pasted/shared/OCR text
@@ -108,8 +114,12 @@ GET  /health                      public readiness probe
   so the free-tier cold start never crashes a worker.
 - **Env vars** (set in the Render dashboard — the Blueprint marks them `sync: false`:
   `DATABASE_URL`, `API_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL`, `BREVO_API_KEY`,
-  `EMAIL_FROM`, `EMAIL_FROM_NAME`, `YOUR_NAME`, `YOUR_PHONE`, `YOUR_EMAIL`, `DEBUG`.
+  `EMAIL_FROM`, `EMAIL_FROM_NAME`, `YOUR_NAME`, `YOUR_PHONE`, `YOUR_EMAIL`,
+  `APP_USERNAME`, `APP_PASSWORD`, `DEBUG`.
   Without `GROQ_API_KEY`/`BREVO_API_KEY` cloud AI extraction and email are disabled.
+- **Auth**: the dashboard is a personal login page (`APP_USERNAME`/
+  `APP_PASSWORD` → signed HttpOnly session cookie). No raw API-token popup — that
+  prompt is the phishing-signal Google Web Risk flagged on the old free subdomain.
 
 ## Local development
 ```
@@ -121,7 +131,8 @@ uvicorn main:app --reload   # http://localhost:8000/dashboard
 ```
 Load the extension from `extension/` via `chrome://extensions` → Developer mode →
 Load unpacked. One-time setup: click the extension → set backend URL `http://localhost:8000`
-and the API token. After any `extension/content.js` change: reload the extension and
+and the API token (extension uses the token header; the dashboard uses username/password
+login). After any `extension/content.js` change: reload the extension and
 refresh LinkedIn (F5).
 
 ## Feature roadmap

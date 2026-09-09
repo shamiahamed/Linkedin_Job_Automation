@@ -1,4 +1,5 @@
 import os
+import hashlib
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -33,6 +34,15 @@ class Config:
 
     # API security (empty token = open local dev; set a strong value when deployed)
     API_TOKEN = os.getenv("API_TOKEN", "")
+
+    # Personal dashboard login (username + password -> session cookie).
+    # APP_PASSWORD must be non-empty when deployed; the dashboard uses this login
+    # instead of the raw API-token prompt (removes the phishing-page signal).
+    APP_USERNAME = os.getenv("APP_USERNAME", "shamim")
+    APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+    SESSION_SECRET = os.getenv("SESSION_SECRET", "") or hashlib.sha256(
+        (APP_USERNAME + ":" + APP_PASSWORD).encode()
+    ).hexdigest()
 
     # Brevo (Email)
     BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")

@@ -24,14 +24,15 @@ uvicorn main:app --reload             # keep this running
 ### A2. Verify server
 Open `http://localhost:8000/dashboard`.
 Check `http://localhost:8000/health` → `{"status":"ok","app":"Job Auto-Apply"}`.
-Dashboard will ask for the API token — paste your local `API_TOKEN` from `.env`
-(or leave blank if `.env` has no token = open local dev).
+Dashboard opens the **login screen** — sign in with the local `APP_USERNAME` /
+`APP_PASSWORD` from `.env` (if `.env` leaves `APP_PASSWORD` empty = open local dev).
 
 ### A3. Load the Chrome extension (one-time)
 1. `chrome://extensions` → enable **Developer mode**.
 2. **Load unpacked** → pick the `extension` folder in the project.
 3. Pin the extension → gear icon → set **Backend URL = `http://localhost:8000`** and
    paste the local API token. Save (stored in `chrome.storage.local`).
+   (The extension keeps using the token header; the dashboard itself uses login.)
 4. Open `linkedin.com/feed` (or a jobs search) and scroll — captures appear bottom-right.
    Reload extension + F5 after any `content.js` change.
 
@@ -60,7 +61,15 @@ Dashboard will ask for the API token — paste your local `API_TOKEN` from `.env
 ## PART B — CLOUD (Render + Neon)
 
 > Auto-deploys from GitHub `main`. Every `git push` redeploys (~1–2 min for Build →
-> Deploy). Your app is already live at `https://job-auto-apply-uvi4.onrender.com`.
+> Deploy).
+>
+> **Important (Sep 2026):** Render suspended the old service
+> `job-auto-apply-uvi4` for a Google Web Risk false-positive and requires
+> "significant code changes" before re-listing. This version replaces the raw
+> API-token popup with a **real username/password login** — the upgrade needed to
+> re-enable cloud. Create a **new** Web Service from this repo (`backend/` root,
+> Docker runtime), set all env vars below, and use the new `https://<name>.onrender.com`.
+> Your data is safe in Neon (`DATABASE_URL` unchanged).
 
 ### B1. Environment variables — DO THIS (missing now)
 Render Dashboard → your service → **Environment** → add:
@@ -68,7 +77,9 @@ Render Dashboard → your service → **Environment** → add:
 | Key | Value / source |
 |-----|----------------|
 | `DATABASE_URL` | your Neon pooled URL (already set) |
-| `API_TOKEN` | generated value (already set) — the dashboard & extension token |
+| `API_TOKEN` | generated value (already set) — used by the *extension* & scripts |
+| `APP_USERNAME` | your dashboard login username (set one) |
+| `APP_PASSWORD` | your dashboard login password (set a strong one — DO message) |
 | `GROQ_API_KEY` | your key garden at https://console.groq.com (enables AI extraction + cover letters) |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` |
 | `BREVO_API_KEY` | your Brevo key (enables real email send) |
@@ -92,8 +103,8 @@ Invoke-RestMethod -Uri 'https://job-auto-apply-uvi4.onrender.com/api/resumes' -H
 ```
 
 ### B3. Use the cloud dashboard / PWA / mobile
-1. Open the app URL on your PC → paste the cloud `API_TOKEN` when asked (saved in
-   `localStorage`).
+1. Open the app URL on your PC → sign in with `APP_USERNAME` / `APP_PASSWORD`
+   (dashboard login; session saved in an HttpOnly cookie).
 2. **Phone**: open the URL in Chrome/Edge → browser menu → **Add to Home screen /
    Install app**. It's a standalone PWA now.
 3. **Share from LinkedIn app / any app**: install the PWA → in linkedin, open a post →
@@ -132,10 +143,11 @@ Invoke-RestMethod -Uri 'https://job-auto-apply-uvi4.onrender.com/api/resumes' -H
 
 | Action | Local | Cloud |
 |--------|-------|-------|
-| Dashboard | `http://localhost:8000/dashboard` | `https://job-auto-apply-uvi4.onrender.com/dashboard` |
+| Dashboard | `http://localhost:8000/dashboard` | `https://<name>.onrender.com/dashboard` |
 | Health | `http://localhost:8000/health` | `…/health` |
 | Start server | `uvicorn main:app --reload` | push to `main` |
 | DB | `backend/job_automation.db` (SQLite) | Neon Postgres (pooled) |
-| Extension URL | `http://localhost:8000` | `https://job-auto-apply-uvi4.onrender.com` |
-| Token | `.env` `API_TOKEN` | Render env `API_TOKEN` |
+| Extension URL | `http://localhost:8000` | `https://<name>.onrender.com` |
+| Extension/scripts | `.env` `API_TOKEN` (header) | Render env `API_TOKEN` (header) |
+| Dashboard login | `.env` `APP_USERNAME`/`APP_PASSWORD` | Render env `APP_USERNAME`/`APP_PASSWORD` |
 | Resumes | DB (uploaded) + optional `backend/resumes/` | DB only (folder is empty on Render) |

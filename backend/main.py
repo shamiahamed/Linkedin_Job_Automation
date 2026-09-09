@@ -4,13 +4,14 @@ import time
 import json
 import uvicorn
 from pathlib import Path
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from pydantic import BaseModel
 from config import Config
 from database import Base, engine
-from security import require_api_token
+from security import require_auth, make_session_token, has_session
 from routes import jobs, applications, email_routes, resumes
 
 
@@ -72,14 +73,14 @@ class SecurityHeaders(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeaders)
 
-_AUTH = [Depends(require_api_token)]
+_AUTH = [Depends(require_auth)]
 
 app.include_router(jobs.router, dependencies=_AUTH)
 app.include_router(applications.router, dependencies=_AUTH)
 app.include_router(email_routes.router, dependencies=_AUTH)
 app.include_router(resumes.router, dependencies=_AUTH)
 
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 
 app.mount("/static", StaticFiles(directory=Config.BASE_DIR / "static"), name="static")
 
@@ -102,6 +103,51 @@ def health():
     """Public readiness probe for Render — deliberately OUTSIDE the API token
     gate so platform health checks (no auth header) can reach it."""
     return {"status": "ok", "app": Config.APP_NAME}
+
+
+class LoginBody(BaseModel):
+    username: str = ""
+    password: str = ""
+
+
+@app.post("/api/auth/login")
+def auth_login(request: Request, body: LoginBody):
+    import hmac as _hmac
+
+    pw_configured = (Config.APP_PASSWORD or "").strip()
+    ok = (
+        pw_configured
+        and _hmac.compare_digest(body.username.strip(), Config.APP_USERNAME)
+        and _hmac.compare_digest(body.password, pw_configured)
+    )
+    if not ok:
+        raise HTTPException(status_code=401, detail="invalid username or password")
+    resp = JSONResponse({"ok": True, "name": Config.YOUR_NAME})
+    resp.set_cookie(
+        "session",
+        make_session_token(),
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
+    return resp
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("session", path="/")
+    return resp
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    open_dev = not (Config.API_TOKEN or "").strip() and not (Config.APP_PASSWORD or "").strip()
+    if open_dev:
+        return {"authenticated": True}
+    return {"authenticated": has_session(request)}
 
 
 @app.post("/api/debug/log", dependencies=_AUTH)

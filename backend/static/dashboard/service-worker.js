@@ -1,4 +1,4 @@
-const CACHE = 'jaa-shell-v2';
+const CACHE = 'jaa-shell-v3';
 const PRECACHE = [
   '/static/dashboard/index.html',
   '/static/dashboard/manifest.webmanifest',
