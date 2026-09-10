@@ -503,6 +503,7 @@
                                     `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 bg-orange-50 rounded-md px-3 py-2">📞 Summary</button>` : ''))}
                         ${job.apply_link && !(job.emails && job.emails.length) ? `<a href="${esc(job.apply_link)}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 text-xs font-medium border border-teal-200 bg-teal-50 rounded-md px-3 py-2">🔗 Open link</a>` : ''}
                         <button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Details">👁</button>
+                        ${job.status === 'applied' ? `<button onclick="setJobStatus(${job.id},'ready_to_send')" class="text-blue-500 hover:text-blue-700 text-xs font-medium rounded-md px-2 py-2" title="Reopen Confirm & send with resume chooser">↩ Stage</button>` : ''}
                         ${job.status === 'duplicate' ? `<button onclick="setJobStatus(${job.id},'pending')" class="text-amber-600 hover:text-amber-800 text-xs font-medium rounded-md px-2 py-2" title="Treat as new opening">↩ Un-dup</button>` : ''}
                         <button onclick="deleteJob(${job.id})" class="text-red-400 hover:text-red-600 text-xs rounded-md px-2 py-2 ml-auto" title="Delete">🗑</button>
                     </div>
