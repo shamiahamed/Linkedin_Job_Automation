@@ -446,6 +446,19 @@
             return Math.round(s / 86400) + 'd ago';
         }
 
+        function isNew(job) {
+            if (!job.created_at) return false;
+            const d = new Date(job.created_at.replace(' ', 'T'));
+            return (Date.now() - d.getTime()) < 24 * 3600 * 1000;
+        }
+
+        function isEdited(job) {
+            if (!job.updated_at || !job.created_at) return false;
+            const u = new Date(job.updated_at.replace(' ', 'T'));
+            const c = new Date(job.created_at.replace(' ', 'T'));
+            return u.getTime() - c.getTime() > 90 * 1000;
+        }
+
         async function loadJobs() {
             let qp = '?';
             if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
@@ -492,7 +505,7 @@
                     <div class="flex flex-wrap items-center gap-1.5">${contactCell(job)}</div>
                     <p class="text-xs text-gray-400 flex items-center gap-3">
                         <span>🎯 ${compactExp(job)}${job.salary ? ' · 💰 ' + esc(job.salary) : ''}</span>
-                        <span>${timeAgo(job.created_at)}</span>
+                        <span class="flex items-center gap-1">${isNew(job) ? '<span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" title="captured recently"></span>' : ''}${timeAgo(job.created_at)}${isEdited(job) ? '<span class="text-gray-400 opacity-80">· edited ' + timeAgo(job.updated_at) + '</span>' : ''}</span>
                     </p>
                     <div class="flex items-center gap-2 pt-1 flex-wrap">
                         ${job.status === 'ready_to_send' ?

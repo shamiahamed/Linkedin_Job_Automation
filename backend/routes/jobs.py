@@ -201,7 +201,8 @@ def list_jobs(
     db: Session = Depends(get_db),
 ):
     cleanup_no_contact(db)
-    query = db.query(Job).order_by(Job.created_at.desc())
+    purge_old_jobs(db, days=PURGE_DAYS)
+    query = db.query(Job).order_by(func.coalesce(Job.updated_at, Job.created_at).desc())
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if statuses:
@@ -613,6 +614,24 @@ def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
         Job.created_at < cutoff,
         or_(Job.apply_link.is_(None), Job.apply_link == ""),
     ).all()
+    count = 0
+    for j in rows:
+        db.query(Application).filter(Application.job_id == j.id).delete()
+        db.delete(j)
+        count += 1
+    if count:
+        db.commit()
+    return count
+
+
+PURGE_DAYS = 5
+
+
+def purge_old_jobs(db: Session, days: int = PURGE_DAYS) -> int:
+    """Auto-erase ALL dashboard jobs older than `days` (the user's retention rule).
+    Applications for those jobs go with them (keeps Postgres FK clean)."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = db.query(Job).filter(Job.created_at < cutoff, Job.status != "no_contact").all()
     count = 0
     for j in rows:
         db.query(Application).filter(Application.job_id == j.id).delete()

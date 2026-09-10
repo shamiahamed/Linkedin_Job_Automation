@@ -11,7 +11,7 @@ import sys
 import time
 
 from database import SessionLocal
-from routes.jobs import cleanup_no_contact
+from routes.jobs import cleanup_no_contact, purge_old_jobs
 from models import Job
 
 STATUSES = [
@@ -30,10 +30,12 @@ def run() -> None:
     db = SessionLocal()
     try:
         deleted = cleanup_no_contact(db, max_age_hours=24)
+        purged = purge_old_jobs(db, days=5)
         counts = {s: db.query(Job).filter(Job.status == s).count() for s in STATUSES}
         print(json.dumps({
             "cron": "housekeeping",
             "deleted_no_contact": deleted,
+            "purged_older_than_5d": purged,
             "jobs": counts,
             "seconds": round(time.time() - start, 2),
         }, ensure_ascii=False))

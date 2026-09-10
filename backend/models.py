@@ -22,6 +22,7 @@ class Job(Base):
     has_phone = Column(Boolean, default=False)
     status = Column(String(20), default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def to_dict(self):
         return {
@@ -41,6 +42,7 @@ class Job(Base):
             "has_phone": self.has_phone,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

@@ -17,6 +17,7 @@ _ADDITIONS = [
     ("jobs", "apply_link", "VARCHAR(500)"),
     ("jobs", "has_email", "BOOLEAN"),
     ("jobs", "has_phone", "BOOLEAN"),
+    ("jobs", "updated_at", "TIMESTAMPTZ DEFAULT now()"),
 ]
 
 # (table, column, sql type) — widen existing columns (SQLite ignores lengths so
@@ -45,6 +46,12 @@ def migrate(engine) -> None:
                         f"ALTER COLUMN {column} TYPE {sql_type}"
                     )
                 )
+            conn.execute(
+                text(
+                    "UPDATE jobs SET updated_at = created_at "
+                    "WHERE updated_at IS NULL"
+                )
+            )
         logger.info("Postgres migrations applied")
     except Exception:
         logger.exception("Postgres migration step failed (non-fatal)")
