@@ -14,7 +14,7 @@ class Job(Base):
     description = Column(Text, nullable=True)
     emails = Column(JSON, default=list)
     phones = Column(JSON, default=list)
-    experience = Column(String(50), nullable=True)
+    experience = Column(String(255), nullable=True)
     salary = Column(String(100), nullable=True)
     source = Column(String(50), default="linkedin")
     apply_link = Column(String(500), nullable=True)

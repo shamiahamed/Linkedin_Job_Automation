@@ -19,6 +19,12 @@ _ADDITIONS = [
     ("jobs", "has_phone", "BOOLEAN"),
 ]
 
+# (table, column, sql type) — widen existing columns (SQLite ignores lengths so
+# this only matters on Postgres, where captures with long 'experience' text 500'd).
+_ALTERS = [
+    ("jobs", "experience", "VARCHAR(255)"),
+]
+
 
 def migrate(engine) -> None:
     if engine.dialect.name != "postgresql":
@@ -30,6 +36,13 @@ def migrate(engine) -> None:
                     text(
                         f"ALTER TABLE {table} "
                         f"ADD COLUMN IF NOT EXISTS {column} {sql_type}"
+                    )
+                )
+            for table, column, sql_type in _ALTERS:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table} "
+                        f"ALTER COLUMN {column} TYPE {sql_type}"
                     )
                 )
         logger.info("Postgres migrations applied")
