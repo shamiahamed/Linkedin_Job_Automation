@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Job Auto-Detector</string>
+    <string name="service_label">Job Auto-Apply detector (LinkedIn)</string>
+    <string name="accessibility_description">Watches the LinkedIn app while you scroll. When a job posting is detected, it sends the post text to your Job Auto-Apply backend so it can be captured and applied to automatically.</string>
+    <color name="ic_launcher_background">#0A66C2</color>
+</resources>
