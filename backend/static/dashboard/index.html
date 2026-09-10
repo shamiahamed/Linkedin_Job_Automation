@@ -935,12 +935,17 @@
         function handleShareTarget() {
             const params = new URLSearchParams(location.search);
             if (params.get('shared')) {
-                const text = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n');
-                if (text) {
-                    document.getElementById('pasteText').value = text;
-                    const st = document.getElementById('pasteStatus');
-                    st.textContent = 'Shared text loaded — tap Capture.';
-                    if (text.length >= 30) { captureFromText(); }
+                const text = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n').trim();
+                const ta = document.getElementById('pasteText');
+                const st = document.getElementById('pasteStatus');
+                if (text) ta.value = text;
+                if (text.length >= 30) {
+                    st.textContent = 'Shared text loaded — capturing…';
+                    captureFromText();
+                } else {
+                    st.textContent = /^https?:\/\/.+/.test(text)
+                        ? 'LinkedIn passed only the link — open the post, copy its text, and paste it here to capture.'
+                        : 'Shared content too short to extract — paste the full post (role, company, contact).';
                 }
             }
         }
