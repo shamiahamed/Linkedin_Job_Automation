@@ -4,6 +4,9 @@ from sqlalchemy import func, or_
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 import re
 import threading
 from database import get_db
@@ -161,22 +164,28 @@ def create_job_from_text(payload: TextCapture, db: Session = Depends(get_db)):
             "Could not recognize a job in this text. Paste more of the post "
             "(include the role, company and any contact info).",
         )
-    return create_job(
-        JobCreate(
-            title=ref["title"],
-            company=ref.get("company"),
-            location=ref.get("location"),
-            url=None,
-            description=text,
-            emails=ref.get("emails") or [],
-            phones=ref.get("phones") or [],
-            experience=ref.get("experience"),
-            salary=ref.get("salary"),
-            source=payload.source or "mobile",
-            apply_link=ref.get("apply_link") or "",
-        ),
-        db,
-    )
+    try:
+        return create_job(
+            JobCreate(
+                title=ref["title"],
+                company=ref.get("company"),
+                location=ref.get("location"),
+                url=None,
+                description=text,
+                emails=ref.get("emails") or [],
+                phones=ref.get("phones") or [],
+                experience=ref.get("experience"),
+                salary=ref.get("salary"),
+                source=payload.source or "mobile",
+                apply_link=ref.get("apply_link") or "",
+            ),
+            db,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("from-text pipeline failed")
+        raise HTTPException(500, f"from-text pipeline error: {e}")
 
 
 EXPERIENCE_BUCKETS = {"0-1": (0, 12), "1-3": (13, 36), "3+": (37, None)}

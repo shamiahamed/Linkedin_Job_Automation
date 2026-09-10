@@ -13,6 +13,7 @@ from config import Config
 from database import Base, engine
 from security import require_auth, make_session_token, has_session
 from routes import jobs, applications, email_routes, resumes
+from migrate import migrate
 
 
 # Create tables on startup — never crash a worker if the DB is cold/ waking
@@ -31,6 +32,8 @@ def _ensure_tables(retries: int = 4, wait: float = 5.0):
 
 
 _ensure_tables()
+
+migrate(engine)
 
 # Lightweight migration: add apply_link to existing SQLite DB (idempotent, SQLite only)
 if Config.DATABASE_URL.startswith("sqlite"):
