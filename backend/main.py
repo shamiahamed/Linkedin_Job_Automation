@@ -35,16 +35,18 @@ _ensure_tables()
 
 migrate(engine)
 
-# Lightweight migration: add apply_link to existing SQLite DB (idempotent, SQLite only)
+# Lightweight migration: add new columns to existing SQLite DB (idempotent, SQLite only)
 if Config.DATABASE_URL.startswith("sqlite"):
     try:
         from sqlalchemy import text as _sql
 
         with engine.connect() as _conn:
             _cols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(jobs)")).fetchall()]
-            if "apply_link" not in _cols:
-                _conn.execute(_sql("ALTER TABLE jobs ADD COLUMN apply_link TEXT"))
-                _conn.commit()
+            for _col, _def in (("apply_link", "TEXT"), ("updated_at", "DATETIME")):
+                if _col not in _cols:
+                    _conn.execute(_sql(f"ALTER TABLE jobs ADD COLUMN {_col} {_def}"))
+            _conn.execute(_sql("UPDATE jobs SET updated_at = created_at WHERE updated_at IS NULL"))
+            _conn.commit()
     except Exception:
         pass
 
