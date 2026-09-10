@@ -101,6 +101,20 @@ def dashboard_jobs():
 DEBUG_LOG = Path(__file__).parent / "debug.log"
 
 
+@app.exception_handler(Exception)
+async def _generic_500(request: Request, exc: Exception):
+    """Keep DB/schema details out of API responses; log them instead."""
+    import traceback as _tb
+    try:
+        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n[{_time.strftime('%Y-%m-%d %H:%M:%S')}] {request.method} {request.url.path}\n")
+            _tb.print_exc(file=f)
+    except Exception:
+        pass
+    detail = str(exc)[:200] if (Config.DEBUG or str(Config.APP_PASSWORD).strip() == "") else "internal error"
+    return JSONResponse(status_code=500, content={"detail": detail})
+
+
 @app.get("/health", include_in_schema=False)
 def health():
     """Public readiness probe for Render — deliberately OUTSIDE the API token
@@ -113,8 +127,28 @@ class LoginBody(BaseModel):
     password: str = ""
 
 
+# Cheap in-memory brute-force guard: max 10 failed attempts per IP per 15 min.
+from collections import defaultdict as _defaultdict
+import time as _time
+
+_LOGIN_ATTEMPTS = _defaultdict(list)
+_LOGIN_WINDOW = 15 * 60
+_LOGIN_MAX_FAILS = 10
+
+
+def _login_rate_limited(request: Request) -> bool:
+    ip = request.client.host if request.client else "unknown"
+    now = _time.time()
+    window = [t for t in _LOGIN_ATTEMPTS[ip] if now - t < _LOGIN_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = window
+    return len(window) >= _LOGIN_MAX_FAILS
+
+
 @app.post("/api/auth/login")
 def auth_login(request: Request, body: LoginBody):
+    if _login_rate_limited(request):
+        raise HTTPException(status_code=429, detail="Too many attempts, try again later")
+
     import hmac as _hmac
 
     pw_configured = (Config.APP_PASSWORD or "").strip()
@@ -124,6 +158,7 @@ def auth_login(request: Request, body: LoginBody):
         and _hmac.compare_digest(body.password, pw_configured)
     )
     if not ok:
+        _LOGIN_ATTEMPTS[request.client.host if request.client else "unknown"].append(_time.time())
         raise HTTPException(status_code=401, detail="invalid username or password")
     resp = JSONResponse({"ok": True, "name": Config.YOUR_NAME})
     resp.set_cookie(
