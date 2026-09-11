@@ -1,4 +1,4 @@
-const CACHE = 'jaa-shell-v3';
+const CACHE = 'jaa-shell-v4';
 const PRECACHE = [
   '/static/dashboard/index.html',
   '/static/dashboard/manifest.webmanifest',
@@ -25,6 +25,23 @@ self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
   if (u.pathname.startsWith('/api/')) return;
+
+  const isShell = u.pathname === '/static/dashboard/index.html' || e.request.mode === 'navigate';
+
+  if (isShell) {
+    // network-first so the PWA always picks up the newest dashboard instantly
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        if (res.ok) {
+          caches.open(CACHE).then((c) => c.put(e.request, res.clone()));
+        }
+        return res;
+      }).catch(() =>
+        caches.match('/static/dashboard/index.html').then((shell) => shell || Response.error())
+      )
+    );
+    return;
+  }
 
   e.respondWith(
     caches.open(CACHE).then((c) =>
