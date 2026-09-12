@@ -44,10 +44,13 @@ class Config:
         (APP_USERNAME + ":" + APP_PASSWORD).encode()
     ).hexdigest()
 
-    # Brevo (Email)
-    BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
-    BREVO_SENDER_EMAIL = os.getenv("EMAIL_FROM", os.getenv("BREVO_SENDER_EMAIL", ""))
-    BREVO_SENDER_NAME = os.getenv("EMAIL_FROM_NAME", "Shamim Ahamed J")
+    # Gmail API (the only mailer now — works on Render free tier via HTTPS 443)
+    GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID", "")
+    GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "")
+    GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN", "")
+    GMAIL_USER = os.getenv("GMAIL_USER", os.getenv("EMAIL_FROM", "ahamedshamin5@gmail.com"))
+    EMAIL_FROM = os.getenv("EMAIL_FROM", "ahamedshamin5@gmail.com")
+    EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "Shamim Ahamed J")
 
     # Groq LLM (optional enrichment — off when key missing)
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")

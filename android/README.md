@@ -3,13 +3,30 @@
 A tiny Android app that watches the LinkedIn app while you scroll and sends each
 detected job post to your Job Auto-Apply backend — no extension needed on mobile.
 
-## How it works
-- An **Accessibility Service** (scoped to `com.linkedin.android`) reads the on-screen
-  text while the LinkedIn app is open.
-- When the visible text looks like a job post (job keywords + a LinkedIn post URL),
-  it POSTs the text to your backend:
-  `{backend_url}/api/jobs/from-text` with header `X-API-Key: <your API_TOKEN>`.
-- Deduping is built in (each post URL / snippet is sent once).
+## How it works (Collector → Processor → Intelligence)
+```
+Android app            FastAPI backend            Groq
+(COLLECTOR)            (PROCESSOR)                (INTELLIGENCE)
+│                        │                            │
+├─ watch LinkedIn app     │                            │
+├─ extract screen text   ┐│                            │
+├─ debounce events      →│├→ clean / validate / dedupe ─┤
+├─ normalize whitespace  │├→ extract job fields (title, │
+└─ POST candidate text   ││   company, location, exp,   │
+         │               ││   skills, apply info)       │
+         ▼               ▼└──────────────────────────────┘
+   /api/jobs/from-text             │
+                                   ▼
+                              Database → Dashboard
+```
+- The Android app is **only a collector**: it detects screen changes, extracts the
+  visible text, debounces, lightly normalizes, sends, and dedupes locally.
+- It does **NOT** decide whether the text is a job post. No keyword classifier lives
+  on the device — words like "developer"/"hiring" are never used to decide.
+- The **backend + Groq** remain the sole authority: non-job candidates come back as
+  `422 "Could not recognize a job"` and are silently ignored by the app.
+- The backend needs `GROQ_API_KEY` set for classification to work; without it, all
+  candidates are rejected. "Enabled" in the app only controls collection.
 
 ## Install
 1. Download `job-auto-detector.apk` from the **Actions → Build Android APK →
@@ -26,9 +43,10 @@ detected job post to your Job Auto-Apply backend — no extension needed on mobi
 ## Security notes
 - The token is stored in the app's private SharedPreferences (restricted storage).
 - The Accessibility Service is **package-scoped** to the LinkedIn app only and
-  reads/transmits nothing except the post text sent to your own backend.
+  reads/transmits nothing except on-screen text sent to your own backend.
 - To stop: turn the switch off, or disable the service in Accessibility settings.
 
 ## Privacy
-The screen text is only scanned while the LinkedIn app is foregrounded, and only
-text matching job-post heuristics is sent — to your own server.
+The screen text is only scanned while the LinkedIn app is foregrounded. Everything
+captured is sent to your own server, where the Groq model decides whether it is a
+job post.

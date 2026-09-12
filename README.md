@@ -14,7 +14,9 @@ installable PWA on your phone.
 3. Render auto-creates a **free Postgres** DB and a random **API_TOKEN**
    (`generateValue: true`). In **Environment → Edit** set these (see .env.example):
    - `GROQ_API_KEY` (from console.groq.com — enables AI extraction + email drafts)
-   - `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME` (email sending)
+   - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
+     `GMAIL_USER` (Gmail API — sends applications as your real Gmail; generate
+     the refresh token with `python backend/gmail_setup.py`)
    - `YOUR_NAME`, `YOUR_PHONE`, `YOUR_EMAIL` (your details)
    - `APP_USERNAME`, `APP_PASSWORD` (dashboard login — personal credentials)
    - Leave `DATABASE_URL` and `API_TOKEN` as Render generated them.

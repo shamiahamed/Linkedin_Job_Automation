@@ -1,5 +1,7 @@
 # Secrets — never commit these
 .env
+gmail_credentials.json
+*token*.json
 
 # Local runtime data
 *.db
@@ -23,6 +25,11 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Android build outputs
+android/.gradle/
+android/**/build/
+android/**/.gradle/
 
 # OS / editor
 .DS_Store

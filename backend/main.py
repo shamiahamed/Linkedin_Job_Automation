@@ -85,9 +85,14 @@ app.include_router(applications.router, dependencies=_AUTH)
 app.include_router(email_routes.router, dependencies=_AUTH)
 app.include_router(resumes.router, dependencies=_AUTH)
 
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 
 app.mount("/static", StaticFiles(directory=Config.BASE_DIR / "static"), name="static")
+
+
+@app.get("/google9b6312a2ba915959.html", include_in_schema=False)
+def google_verification():
+    return FileResponse(Config.BASE_DIR / "static" / "google9b6312a2ba915959.html", media_type="text/html")
 
 
 @app.get("/dashboard")

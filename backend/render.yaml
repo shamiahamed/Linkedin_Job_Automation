@@ -14,11 +14,17 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-20b
-      - key: BREVO_API_KEY
-        sync: false
       - key: EMAIL_FROM
         sync: false
       - key: EMAIL_FROM_NAME
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_USER
         sync: false
       - key: YOUR_NAME
         sync: false

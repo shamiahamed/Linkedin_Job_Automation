@@ -134,7 +134,7 @@ def test_email():
     if not sender.configured:
         return {
             "success": False,
-            "error": "Brevo API key not set. Add BREVO_API_KEY to .env",
+            "error": "Gmail API not configured. Set GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN (see .env.example)",
         }
     from config import Config
     result = sender.send_email(

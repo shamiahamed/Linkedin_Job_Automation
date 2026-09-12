@@ -1,6 +1,6 @@
 # Job Auto-Apply — Project Overview
 
-An automated **LinkedIn job capture and application assistant** with a Chrome extension (desktop feed detection + OCR), a **FastAPI** backend, **Brevo** transactional email, **Neon PostgreSQL**, served by **Render**, and a **mobile-first PWA dashboard** that can be installed as an APK via a Trusted Web Activity (TWA) wrapper.
+An automated **LinkedIn job capture and application assistant** with a Chrome extension (desktop feed detection + OCR), a **FastAPI** backend, **Gmail API** transactional email, **Neon PostgreSQL**, served by **Render**, and a **mobile-first PWA dashboard** that can be installed as an APK via a Trusted Web Activity (TWA) wrapper.
 
 The system watches a LinkedIn feed for job posts, extracts role/company/experience/contact/apply-link, optionally emails an application (or stages it for your approval), emails you phone-call summaries and open-apply-link reminders, and keeps a searchable, filterable queue.
 
@@ -21,7 +21,7 @@ The system watches a LinkedIn feed for job posts, extracts role/company/experien
              FastAPI + SQLAlchemy (Render)
         ┌──────────────┼───────────────┬───────────────┐
         ▼              ▼               ▼               ▼
-    Neon Postgres   Groq LLM         Brevo SMTP      Resumes (DB)
+    Neon Postgres   Groq LLM         Gmail API      Resumes (DB)
     (jobs/apps)     (extraction +    (email +         (PDF management,
                     cover letters)    attachments)     per-job selection)
 ```
@@ -108,15 +108,17 @@ GET  /health                      public readiness probe
 - **Web service**: `backend` (Docker). Dockerfile pins `WEB_CONCURRENCY=-1` (one
   gunicorn worker — the free 0.1 CPU / 512 MB plan can't OCR and serve two workers).
   Auto-deploys from the `main` branch (GitHub → Render).
-- **Cron**: `backend/render.yaml` declares a daily cron running `cron_worker.py`
-  (purges stale no-contact rows, logs a stats summary).
+- **Auto-cleanup**: inside the app — startup loop runs every 6h plus on every job
+  ingest (drops stale no-contact rows >24h, auto-purges captured jobs after 5 days).
 - **DB**: Neon Postgres (pooler connection). Tables are created on startup with retry
   so the free-tier cold start never crashes a worker.
 - **Env vars** (set in the Render dashboard — the Blueprint marks them `sync: false`:
-  `DATABASE_URL`, `API_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL`, `BREVO_API_KEY`,
-  `EMAIL_FROM`, `EMAIL_FROM_NAME`, `YOUR_NAME`, `YOUR_PHONE`, `YOUR_EMAIL`,
+  `DATABASE_URL`, `API_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL`, `GMAIL_CLIENT_ID`,
+  `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`, `GMAIL_USER`, `EMAIL_FROM`,
+  `EMAIL_FROM_NAME`, `YOUR_NAME`, `YOUR_PHONE`, `YOUR_EMAIL`,
   `APP_USERNAME`, `APP_PASSWORD`, `DEBUG`.
-  Without `GROQ_API_KEY`/`BREVO_API_KEY` cloud AI extraction and email are disabled.
+  Without `GROQ_API_KEY` AI extraction and cover letters are disabled; without the
+  `GMAIL_*` vars the application emails can't be sent (guarded error message).
 - **Auth**: the dashboard is a personal login page (`APP_USERNAME`/
   `APP_PASSWORD` → signed HttpOnly session cookie). No raw API-token popup — that
   prompt is the phishing-signal Google Web Risk flagged on the old free subdomain.
@@ -151,6 +153,6 @@ refresh LinkedIn (F5).
 ## Demo / wow storyline
 1. Paste or share a LinkedIn post from your phone → it appears in the queue.
 2. Open the PWA → tap "Confirm & send" → your resume + tailored cover letter go to the
-   recruiter's email via Brevo.
+   recruiter's email via the Gmail API.
 3. Show the stats ("Applied", phone summaries, link reminders) and the offline queue.
 4. Share the deploy URL; a visitor pastes a fake post and watches extraction run.
