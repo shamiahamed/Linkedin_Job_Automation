@@ -67,13 +67,12 @@ class EmailBuilder:
         )
 
     def build_cover_letter_html(self) -> str:
-        custom = self.custom_paragraph()
         try:
             from services import llm
 
-            draft = llm.draft_email(self.job, self.additional_message)
-            if draft:
-                custom = draft
+            letter = llm.draft_email(self.job, self.additional_message)
+            if letter:
+                return self._letter_to_html(letter)
         except Exception:
             pass
         template = self.template_env.get_template("cover_letter.html")
@@ -81,11 +80,36 @@ class EmailBuilder:
             job_title=self.job.title or "",
             company=self.job.company or "your company",
             salary=self.job.salary or "",
-            custom_paragraph=custom,
+            custom_paragraph=self.custom_paragraph(),
             applicant_name=Config.YOUR_NAME,
             applicant_phone=Config.YOUR_PHONE,
             applicant_email=Config.YOUR_EMAIL,
         )
+
+    def _letter_to_html(self, letter: str) -> str:
+        """Wrap the AI's plain-text letter into the branded HTML card. Greeting is
+        enforced as 'Dear HR,' unless the user's guidance asks for something else."""
+        paragraphs = [p.strip() for p in letter.split("\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = ["Dear HR,", "Please consider my application for this role."]
+        if not paragraphs[0].lower().startswith("dear"):
+            paragraphs.insert(0, "Dear HR,")
+
+        def _h(v):
+            return escape(str(v or ""))
+
+        body = "".join(f"<p>{_h(p)}</p>" for p in paragraphs)
+        return f"""
+<html><body style="font-family:Arial,Helvetica,sans-serif;color:#333;line-height:1.6;max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:#f4f6f8;padding:20px;border-radius:8px;border:1px solid #e0e0e0;">
+    {body}
+    <br>
+    <p>Best regards,</p>
+    <p><strong>{_h(Config.YOUR_NAME)}</strong></p>
+    <p>📞 {_h(Config.YOUR_PHONE)}</p>
+    <p>✉️ {_h(Config.YOUR_EMAIL)}</p>
+  </div>
+</body></html>"""
 
     def build_subject(self) -> str:
         """AI-generated, guidance-aware subject line; safe template fallback."""

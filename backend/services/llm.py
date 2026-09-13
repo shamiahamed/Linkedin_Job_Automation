@@ -11,6 +11,7 @@ Two jobs:
 """
 import json
 import re
+import time
 import requests
 from config import Config
 
@@ -23,7 +24,7 @@ def _enabled() -> bool:
     return bool((Config.GROQ_API_KEY or "").strip() and _model)
 
 
-def _chat(messages, json_mode=False, max_tokens=2048):
+def _chat(messages, json_mode=False, max_tokens=2048, attempts=3):
     if not _enabled():
         return None
     payload = {
@@ -38,11 +39,29 @@ def _chat(messages, json_mode=False, max_tokens=2048):
         "Authorization": f"Bearer {Config.GROQ_API_KEY.strip()}",
         "Content-Type": "application/json",
     }
-    resp = requests.post(GROQ_URL, json=payload, headers=headers, timeout=40)
-    resp.raise_for_status()
-    data = resp.json()
-    msg = (data.get("choices") or [{}])[0].get("message") or {}
-    return (msg.get("content") or "").strip()
+    last_err = None
+    for i in range(attempts):
+        try:
+            resp = requests.post(GROQ_URL, json=payload, headers=headers, timeout=90)
+            resp.raise_for_status()
+            data = resp.json()
+            msg = (data.get("choices") or [{}])[0].get("message") or {}
+            content = (msg.get("content") or "").strip()
+            if content:
+                return content
+            # Groq sometimes returns empty content for short-output prompts;
+            # retry a couple of times before giving up.
+            last_err = RuntimeError("empty content")
+        except requests.exceptions.HTTPError as e:
+            last_err = e
+            if getattr(e.response, "status_code", None) == 429:
+                time.sleep(5)
+                continue
+            raise
+        except Exception as e:
+            last_err = e
+        time.sleep(2)
+    return None
 
 
 def _parse_json(raw):
@@ -158,9 +177,10 @@ def role_level(job) -> str:
 
 
 def draft_email(job, additional_message: str = "") -> str:
-    """Return a role-specific, personalized cover paragraph, or None on any failure.
-    Experience framing adapts to the role (fresher role -> fresher, 1-year role ->
-    1 year); additional_message (free-form user guidance) steers the subject/body."""
+    """Return a COMPLETE application email body (plain text, greeting -> closing),
+    or None on any failure. Experience framing adapts to the role (fresher role ->
+    fresher, ~1-year role -> 1 year). additional_message is a direct user
+    instruction that can ADD or REMOVE specific sections (e.g. 'remove GitHub')."""
     if not _enabled() or not job:
         return None
     key = f"{job.title or ''}|{job.company or ''}|{(additional_message or '').strip()}"
@@ -172,23 +192,35 @@ def draft_email(job, additional_message: str = "") -> str:
     role_req = " ".join([(job.experience or "").strip(), (job.description or "")[:350]]).strip()[:500]
     guidance = (additional_message or "").strip()
     guidance_part = (
-        f"\nThe applicant wants this email to highlight the following (follow it closely): {guidance}\n"
+        f"The applicant's note below is a DIRECT user instruction — follow it exactly; "
+        f"it may ask you to add or remove specific sections (e.g. remove GitHub):\n"
+        f"\"{guidance}\"\n\n"
         if guidance else ""
     )
     prompt = (
-        f"Write ONE personalized, professional cover-letter paragraph (100–150 words) for "
-        f"a job application to the role '{title}' at '{company}'. The role's stated requirement "
-        f"is: \"{role_req}\". Present the applicant as {level} — match the experience framing to "
-        "the role exactly (entry-level role -> fresher tone; ~1-year role -> one year of "
-        "hands-on experience). Never claim more experience than one year. The applicant is "
-        "Shamim Ahamed J, with FOCAL points: Python/FastAPI/Django backends, data analytics "
-        "(Power BI, SQL), manual + automated QA (Selenium, pytest), and IT network support. "
-        "Match the paragraph to the role and the company, mention an appropriate relevant "
-        f"skill, keep it humble and specific.{guidance_part} No greetings or closing, no "
-        "'I am writing to ' — just the persuasive body paragraph. Return ONLY the plain text."
+        f"Write the COMPLETE body of a professional job-application email (plain text) "
+        f"for the role '{title}' at '{company}'. The role's stated requirement is: "
+        f"\"{role_req}\".\n"
+        f"{guidance_part}"
+        f"RULES:\n"
+        f"- First line MUST be: Dear HR,\n"
+        f"- Then 2–3 short paragraphs, each separated by a blank line.\n"
+        f"- Present the applicant as {level}; never claim more than one year of experience.\n"
+        f"- Applicant: Shamim Ahamed J. Background areas (PICK ONLY the ones relevant to "
+        f"THIS role — do not list unrelated skills): Python/FastAPI/Django backends, data "
+        f"analytics (Power BI, SQL), manual+automated QA (Selenium, pytest), IT network "
+        f"support. For a customer-support role write about communication, diagnosing and "
+        f"resolving issues, and helping users — keep any technical mention brief.\n"
+        f"- Do NOT add any GitHub/projects links, availability phrases like 'available at "
+        f"your convenience', or filler like 'I hope this email finds you well' or "
+        f"'I came across this opportunity'.\n"
+        f"- End with the sentence: Thank you for considering my application.\n"
+        f"- Do NOT include a sign-off or signature (the sender's name/phone/email are added "
+        f"by the system afterwards).\n"
+        f"Return ONLY the email body plain text."
     )
     try:
-        text = _chat([{"role": "user", "content": prompt}], max_tokens=1600)
+        text = _chat([{"role": "user", "content": prompt}], max_tokens=700)
         text = (text or "").strip()
         text = re.sub(r"^\"|\"$", "", text)
         _draft_cache[key] = text or None
