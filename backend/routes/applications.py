@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database import get_db
 from models import Application, Job
 from routes.jobs import _get_setting
@@ -36,13 +36,18 @@ def list_applications(job_id: Optional[int] = None, db: Session = Depends(get_db
             item["job_title"] = job.title
             item["company"] = job.company
             item["job_status"] = job.status
+        created = app.created_at
+        if created is not None and created.tzinfo is not None:
+            # Postgres returns tz-aware datetimes; normalize to naive UTC to compare
+            # with datetime.utcnow() (SQLite is already naive).
+            created = created.astimezone(timezone.utc).replace(tzinfo=None)
         item["followup_due"] = bool(
             app.type == "email"
             and app.status == "sent"
             and not app.followed_up_at
             and not app.outcome
-            and app.created_at
-            and (app.created_at + timedelta(days=followup_days) < now)
+            and created is not None
+            and (created + timedelta(days=followup_days) < now)
         )
         result.append(item)
     return result
