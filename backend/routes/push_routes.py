@@ -22,8 +22,9 @@ def register_subscription(payload: dict = Body(default=None), db: Session = Depe
     """Save a service-worker push subscription (from navigator.pushManager.subscribe)."""
     payload = payload or {}
     endpoint = (payload.get("endpoint") or "").strip()
-    p256dh = (payload.get("p256dh") or "").strip()
-    auth = (payload.get("auth") or "").strip()
+    keys = payload.get("keys") or {}
+    p256dh = (payload.get("p256dh") or keys.get("p256dh") or "").strip()
+    auth = (payload.get("auth") or keys.get("auth") or "").strip()
     if not endpoint or not endpoint.startswith("https://"):
         raise HTTPException(400, "invalid push endpoint")
     if not p256dh or not auth:
