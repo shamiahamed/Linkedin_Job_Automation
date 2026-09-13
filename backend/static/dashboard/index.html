@@ -1287,33 +1287,48 @@
 
         async function toggleNotifications() {
             if (_notifyState) {
-                // Already on -> send a test push to confirm.
+                // Already on -> verify delivery. If the server has no working subscription,
+                // self-heal: unsubscribe and re-subscribe fresh with the current VAPID key.
                 try {
-                    await api('/api/push/test', { method: 'POST' });
-                    showToast('Test push sent');
-                } catch (e) { showToast('Could not send test push', true); }
+                    const res = await api('/api/push/test', { method: 'POST' });
+                    const d = await res.json();
+                    if (d.sent > 0) { showToast(`Test sent to ${d.sent} device${d.sent > 1 ? 's' : ''} ✓`); return; }
+                    // 0 received -> stale (old VAPID key) or lost subscription. Re-subscribe.
+                    const sub = await getSubscription();
+                    if (sub) { await sub.unsubscribe().catch(() => {}); }
+                    await doEnable();
+                    showToast('Re-subscribed with fresh key — test sent ✓');
+                } catch (e) { showToast('Could not send test push: ' + e.message, true); }
                 return;
             }
             try {
-                const perm = await Notification.requestPermission();
-                if (perm !== 'granted') { showToast('Notification permission denied', true); return; }
-                const keyRes = await api('/api/push/vapid-key');
-                const { publicKey } = await keyRes.json();
-                const reg = await navigator.serviceWorker.ready;
-                const sub = await reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(publicKey)
-                });
-                await api('/api/push/register', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(sub.toJSON())
-                });
-                await api('/api/push/test', { method: 'POST' });
-                await refreshNotifyButton();
+                await doEnable();
                 showToast('Notifications enabled — test sent ✓');
             } catch (e) {
                 showToast('Could not enable notifications: ' + e.message, true);
             }
+        }
+
+        async function doEnable() {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') { showToast('Notification permission denied', true); return; }
+            const keyRes = await api('/api/push/vapid-key');
+            const { publicKey } = await keyRes.json();
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(publicKey)
+            });
+            const regRes = await api('/api/push/register', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sub.toJSON())
+            });
+            const j = await regRes.json();
+            if (!regRes.ok || !j.success) throw new Error((j.detail || 'register failed').replace(/^Error: /, ''));
+            const t = await api('/api/push/test', { method: 'POST' });
+            const tj = await t.json();
+            if (tj.sent < 1) throw new Error('no device received the test — check that this browser is running');
+            await refreshNotifyButton();
         }
 
         async function disableNotifications() {

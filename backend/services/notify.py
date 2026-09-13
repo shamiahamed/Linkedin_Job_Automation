@@ -107,9 +107,11 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
                 )
                 sent += 1
             except WebPushException as e:
-                # 404/410 -> subscription dead; drop it.
+                # 404/410 -> subscription dead; drop it. 403 -> the VAPID key used to
+                # subscribe is stale (key rotated in dev), so re-enabling will use the
+                # current key — self-healing instead of failing forever.
                 sc = getattr(e.response, "status_code", None)
-                if sc in (404, 410):
+                if sc in (404, 410, 403):
                     stale.append(s.id)
             except Exception:
                 pass
