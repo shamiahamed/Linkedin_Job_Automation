@@ -7,6 +7,7 @@ Only active when GROQ is optional — this module is fully independent and simpl
 no-ops when there are no subscriptions or the push service is unreachable.
 """
 import base64
+import json
 import logging
 
 logger = logging.getLogger("uvicorn.error")
@@ -105,6 +106,10 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
         }
         sent = 0
         stale = []
+        payload = json.dumps(
+            {"title": title, "body": body, "url": url, "icon": icon},
+            ensure_ascii=False,
+        ).encode("utf-8")
         for s in subs:
             try:
                 webpush(
@@ -112,7 +117,7 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
                         "endpoint": s.endpoint,
                         "keys": {"p256dh": s.p256dh, "auth": s.auth},
                     },
-                    data={"title": title, "body": body, "url": url, "icon": icon},
+                    data=payload,
                     vapid_private_key=vv,
                     vapid_claims=claims,
                     timeout=15,
