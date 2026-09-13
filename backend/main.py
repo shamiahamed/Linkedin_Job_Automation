@@ -138,41 +138,6 @@ async def _generic_500(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": detail})
 
 
-@app.get("/api/__diag", include_in_schema=False)
-def _diag():
-    """TEMPORARY diagnostic: surface the real error behind /api/applications."""
-    import traceback as _tb
-    try:
-        from database import SessionLocal, engine
-        from models import Application, Job
-        from routes.applications import list_applications
-        from sqlalchemy import text
-
-        out = {"dialect": engine.dialect.name}
-        with engine.connect() as conn:
-            if engine.dialect.name == "postgresql":
-                cols = [r[0] for r in conn.execute(
-                    text("SELECT column_name FROM information_schema.columns WHERE table_name='applications'")
-                )]
-                out["application_columns"] = sorted(cols)
-        db = SessionLocal()
-        try:
-            apps = db.query(Application).all()
-            out["app_count"] = len(apps)
-            try:
-                res = list_applications(db=db)
-                out["list_ok"] = len(res)
-            except Exception:
-                out["list_error"] = _tb.format_exc()
-        except Exception:
-            out["select_error"] = _tb.format_exc()
-        finally:
-            db.close()
-        return out
-    except Exception as e:
-        return {"err": str(e), "tb": _tb.format_exc()}
-
-
 @app.get("/health", include_in_schema=False)
 def health():
     """Public readiness probe for Render — deliberately OUTSIDE the API token
