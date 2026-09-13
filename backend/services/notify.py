@@ -179,6 +179,11 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = "", _report
                     vapid_private_key=vv,
                     vapid_claims=claims,
                     timeout=15,
+                    # Queue offline deliveries: FCM holds the message up to 12h and
+                    # delivers it when the device reconnects. Fixes "missed 9 AM
+                    # reminder / job captured while phone offline" — falls back to
+                    # instant delivery whenever the device is already online.
+                    ttl=43200,
                 )
                 sent += 1
             except WebPushException as e:
