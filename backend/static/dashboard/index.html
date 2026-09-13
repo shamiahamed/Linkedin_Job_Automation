@@ -1270,7 +1270,7 @@
             } catch (e) { return null; }
         }
 
-        let _notifyState = null; // null=unknown, true=on, false=off
+        let _notifyState = false; // true = enabled, false = disabled
         async function refreshNotifyButton() {
             const btn = document.getElementById('notifyBtn');
             if (!('Notification' in window) || !('PushManager' in window)) { btn.classList.add('hidden'); return; }
@@ -1279,33 +1279,22 @@
             if (!supported) { btn.classList.add('hidden'); return; }
             _notifyState = !!(sub && Notification.permission === 'granted');
             btn.classList.remove('hidden');
-            btn.textContent = _notifyState ? '🔔 Send test' : '🔔 Enable notifications';
+            btn.textContent = _notifyState ? '🔕 Disable notifications' : '🔔 Enable notifications';
             btn.className = 'text-xs font-medium rounded-lg px-3 py-1.5 ' +
-                (_notifyState ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
+                (_notifyState ? 'text-gray-700 bg-gray-100 border border-gray-200'
                               : 'text-blue-700 bg-blue-50 border border-blue-200');
         }
 
         async function toggleNotifications() {
             if (_notifyState) {
-                // Already on -> verify delivery. If the server has no working subscription,
-                // self-heal: unsubscribe and re-subscribe fresh with the current VAPID key.
+                await disableNotifications();
+                showToast('Notifications disabled');
+            } else {
                 try {
-                    const res = await api('/api/push/test', { method: 'POST' });
-                    const d = await res.json();
-                    if (d.sent > 0) { showToast(`Test sent to ${d.sent} device${d.sent > 1 ? 's' : ''} ✓`); return; }
-                    // 0 received -> stale (old VAPID key) or lost subscription. Re-subscribe.
-                    const sub = await getSubscription();
-                    if (sub) { await sub.unsubscribe().catch(() => {}); }
                     await doEnable();
-                    showToast('Re-subscribed with fresh key — test sent ✓');
-                } catch (e) { showToast('Could not send test push: ' + e.message, true); }
-                return;
-            }
-            try {
-                await doEnable();
-                showToast('Notifications enabled — test sent ✓');
-            } catch (e) {
-                showToast('Could not enable notifications: ' + e.message, true);
+                } catch (e) {
+                    showToast('Could not enable notifications: ' + e.message, true);
+                }
             }
         }
 
@@ -1314,6 +1303,10 @@
             if (perm !== 'granted') { showToast('Notification permission denied', true); return; }
             const keyRes = await api('/api/push/vapid-key');
             const { publicKey } = await keyRes.json();
+            // Always subscribe fresh with the current VAPID key so any stale
+            // subscription from an older build is replaced cleanly.
+            const old = await getSubscription();
+            if (old) await old.unsubscribe().catch(() => {});
             const reg = await navigator.serviceWorker.ready;
             const sub = await reg.pushManager.subscribe({
                 userVisibleOnly: true,
@@ -1325,10 +1318,8 @@
             });
             const j = await regRes.json();
             if (!regRes.ok || !j.success) throw new Error((j.detail || 'register failed').replace(/^Error: /, ''));
-            const t = await api('/api/push/test', { method: 'POST' });
-            const tj = await t.json();
-            if (tj.sent < 1) throw new Error('no device received the test — check that this browser is running');
             await refreshNotifyButton();
+            showToast('Notifications enabled ✓ — job reminders will arrive here');
         }
 
         async function disableNotifications() {
