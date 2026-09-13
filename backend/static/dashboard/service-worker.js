@@ -1,4 +1,4 @@
-const CACHE = 'jaa-shell-v5';
+const CACHE = 'jaa-shell-v6';
 const PRECACHE = [
   '/static/dashboard/index.html',
   '/static/dashboard/manifest.webmanifest',
@@ -36,7 +36,10 @@ self.addEventListener('push', (e) => {
     icon: '/static/dashboard/icons/icon-192.png',
     badge: '/static/dashboard/icons/icon-192.png',
     tag: 'jaa-' + Date.now(),
-    data: { url: data.url || '/dashboard' }
+    data: { url: data.url || '/dashboard' },
+    requireInteraction: true, // stay on screen until clicked/dismissed (no auto-fade in ~5s)
+    renotify: false,
+    silent: false
   };
   e.waitUntil(self.registration.showNotification(data.title || 'Job Auto-Apply', options));
 });
