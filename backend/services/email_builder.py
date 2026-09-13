@@ -9,12 +9,14 @@ from services.resume_selector import ResumeSelector
 
 
 class EmailBuilder:
-    def __init__(self, job, resume_override: dict = None, resume_pin: str = None):
+    def __init__(self, job, resume_override: dict = None, resume_pin: str = None, additional_message: str = ""):
         """resume_override: {'name': str, 'data': base64-str} from an uploaded Resume row.
-        resume_pin: exact filename from the resumes/ folder to force for this job."""
+        resume_pin: exact filename from the resumes/ folder to force for this job.
+        additional_message: free-form user note that guides the AI-generated subject/body."""
         self.job = job
         self.resume_override = resume_override
         self.resume_pin = resume_pin
+        self.additional_message = additional_message or ""
         self.template_env = Environment(loader=FileSystemLoader(Config.TEMPLATES_DIR))
         self.sender = EmailSender()
         self.selector = ResumeSelector()
@@ -52,10 +54,16 @@ class EmailBuilder:
                 "and pytest to ensure product quality. I have a strong attention to detail and enjoy improving "
                 "testing processes."
             )
+        try:
+            from services import llm as _llm
+        except Exception:
+            _llm = None
+        level = _llm.role_level(self.job) if _llm else "an early-career professional"
         return (
-            "I am an enthusiastic and quick-learning professional with strong technical skills and a proven ability "
-            "to deliver results. I am eager to bring my experience and dedication to your team and contribute "
-            "to the success of your organization."
+            f"I am {level} with a proven ability to deliver results through hands-on "
+            "projects across backend engineering, data analytics, and QA. I am eager "
+            "to bring my skills and dedication to your team and contribute to the "
+            "success of your organization."
         )
 
     def build_cover_letter_html(self) -> str:
@@ -63,7 +71,7 @@ class EmailBuilder:
         try:
             from services import llm
 
-            draft = llm.draft_email(self.job)
+            draft = llm.draft_email(self.job, self.additional_message)
             if draft:
                 custom = draft
         except Exception:
@@ -78,6 +86,36 @@ class EmailBuilder:
             applicant_phone=Config.YOUR_PHONE,
             applicant_email=Config.YOUR_EMAIL,
         )
+
+    def build_subject(self) -> str:
+        """AI-generated, guidance-aware subject line; safe template fallback."""
+        try:
+            from services import llm
+
+            subject = llm.draft_subject(self.job, self.additional_message)
+            if subject:
+                return subject
+        except Exception:
+            pass
+        return f"Application for {self.job.title} - {Config.YOUR_NAME}"
+
+    @staticmethod
+    def _html_to_text(html: str, limit: int = 2400) -> str:
+        import re as _re
+
+        text = _re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=_re.I)
+        text = _re.sub(r"</p\s*>", "\n", text, flags=_re.I)
+        text = _re.sub(r"<[^>]+>", "", text)
+        text = _re.sub(r"[ \t]+", " ", text)
+        text = _re.sub(r"\n\s*\n+", "\n\n", text).strip()
+        return text[:limit]
+
+    def build_preview_text(self) -> dict:
+        """Subject + plain-text body preview WITHOUT sending (dashboard 'Preview')."""
+        return {
+            "subject": self.build_subject(),
+            "body": self._html_to_text(self.build_cover_letter_html()),
+        }
 
     def build_phone_summary_html(self) -> str:
         template = self.template_env.get_template("phone_summary.html")
@@ -164,7 +202,7 @@ class EmailBuilder:
                         attachments.append(att)
                         resume_file = picked
 
-        subject = f"Application for {self.job.title} - {Config.YOUR_NAME}"
+        subject = self.build_subject()
         html = self.build_cover_letter_html()
         to_email = self.job.emails[0]
         to_name = self.job.company or ""

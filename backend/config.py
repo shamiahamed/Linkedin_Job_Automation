@@ -60,6 +60,8 @@ class Config:
     YOUR_NAME = os.getenv("YOUR_NAME", "Shamim Ahamed J")
     YOUR_PHONE = os.getenv("YOUR_PHONE", "9894593190")
     YOUR_EMAIL = os.getenv("YOUR_EMAIL", "ahamedshamin5@gmail.com")
+    # Constant hands-on experience assumed in every application email (e.g. "1").
+    YOUR_EXPERIENCE_YEARS = os.getenv("YOUR_EXPERIENCE_YEARS", "1")
 
     # Paths
     RESUMES_DIR = BASE_DIR / "resumes"

@@ -482,6 +482,28 @@ def _resolve_resume_override(db: Session, resume_id) -> Optional[dict]:
     return {"name": row.name, "data": row.data} if row else None
 
 
+@router.post("/jobs/{job_id}/preview")
+def preview_application(job_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    """Generate (without sending) the AI subject + body for this job, guided by the
+    user's optional additional_message and chosen resume. Lets the user review the
+    email before it goes out."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    payload = payload or {}
+    try:
+        resume_override = _resolve_resume_override(db, payload.get("resume_id"))
+        builder = EmailBuilder(
+            job,
+            resume_override=resume_override,
+            resume_pin=payload.get("resume_pin"),
+            additional_message=payload.get("additional_message") or "",
+        )
+        return {"success": True, **builder.build_preview_text()}
+    except Exception as e:
+        return {"success": False, "error": f"Preview failed: {type(e).__name__}: {str(e)}"}
+
+
 @router.post("/jobs/{job_id}/apply", response_model=ApplyResponse)
 def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -492,7 +514,11 @@ def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = 
 
     try:
         resume_override = _resolve_resume_override(db, payload.get("resume_id"))
-        builder = EmailBuilder(job, resume_override=resume_override)
+        builder = EmailBuilder(
+            job,
+            resume_override=resume_override,
+            additional_message=payload.get("additional_message") or "",
+        )
 
         if job.emails:
             # Manual apply = deliberate; allow re-send as a follow-up. But if this
@@ -555,7 +581,12 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
     try:
         resume_override = _resolve_resume_override(db, payload.get("resume_id"))
         resume_pin = payload.get("resume_pin")
-        builder = EmailBuilder(job, resume_override=resume_override, resume_pin=resume_pin)
+        builder = EmailBuilder(
+            job,
+            resume_override=resume_override,
+            resume_pin=resume_pin,
+            additional_message=payload.get("additional_message") or "",
+        )
         if _email_previously_sent(db, job.emails[0]) and not payload.get("confirm_duplicate"):
             return {
                 "success": False,
