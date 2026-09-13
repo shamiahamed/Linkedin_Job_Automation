@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from config import Config
 from database import Base, engine
 from security import require_auth, make_session_token, has_session
-from routes import jobs, applications, email_routes, resumes
+from routes import jobs, applications, email_routes, resumes, push_routes
 from migrate import migrate
 
 
@@ -46,6 +46,21 @@ if Config.DATABASE_URL.startswith("sqlite"):
                 if _col not in _cols:
                     _conn.execute(_sql(f"ALTER TABLE jobs ADD COLUMN {_col} {_def}"))
             _conn.execute(_sql("UPDATE jobs SET updated_at = created_at WHERE updated_at IS NULL"))
+
+            _acols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(applications)")).fetchall()]
+            for _col, _def in (("follow_up_at", "DATETIME"), ("followed_up_at", "DATETIME"),
+                               ("outcome", "VARCHAR(20)"), ("notes", "TEXT")):
+                if _col not in _acols:
+                    _conn.execute(_sql(f"ALTER TABLE applications ADD COLUMN {_col} {_def}"))
+
+            _conn.execute(_sql(
+                "CREATE TABLE IF NOT EXISTS push_subscriptions ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "endpoint VARCHAR(500) NOT NULL UNIQUE, "
+                "p256dh VARCHAR(255) NOT NULL, "
+                "auth VARCHAR(255) NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            ))
             _conn.commit()
     except Exception:
         pass
@@ -84,6 +99,7 @@ app.include_router(jobs.router, dependencies=_AUTH)
 app.include_router(applications.router, dependencies=_AUTH)
 app.include_router(email_routes.router, dependencies=_AUTH)
 app.include_router(resumes.router, dependencies=_AUTH)
+app.include_router(push_routes.router, dependencies=_AUTH)
 
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 
@@ -238,10 +254,11 @@ def root():
 
 @app.on_event("startup")
 async def _startup():
-    """Create tables with retry (Neon wakes from zero on first connect), then
-    run the periodic no-contact cleaner."""
+    """Create tables with retry (Neon wakes from zero on first connect), then run
+    the periodic cleanup + daily-reminder loop."""
     _ensure_tables(retries=3, wait=3.0)
-    from routes.jobs import cleanup_no_contact
+    from routes.jobs import cleanup_no_contact, purge_old_jobs
+    from services.reminders import reminders_due, run_daily_reminders, mark_reminders_done
     from database import SessionLocal
 
     async def _loop():
@@ -249,12 +266,16 @@ async def _startup():
             try:
                 db = SessionLocal()
                 try:
+                    purge_old_jobs(db)
                     cleanup_no_contact(db)
+                    if reminders_due(db):
+                        run_daily_reminders(db)
+                        mark_reminders_done(db)
                 finally:
                     db.close()
             except Exception:
                 pass
-            await asyncio.sleep(6 * 3600)
+            await asyncio.sleep(3600)
 
     asyncio.create_task(_loop())
 

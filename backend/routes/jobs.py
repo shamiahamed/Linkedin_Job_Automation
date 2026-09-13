@@ -9,6 +9,7 @@ import logging
 logger = logging.getLogger("uvicorn.error")
 import re
 import threading
+import time as _time
 from database import get_db
 from models import Job, Application, Setting, Resume
 from services.email_builder import EmailBuilder
@@ -35,6 +36,35 @@ class JobCreate(BaseModel):
     apply_link: Optional[str] = ""
 
 
+class JobEdit(BaseModel):
+    """Editable capture fields — fixes wrong OCR/feed titles, emails, etc. before sending."""
+    status: Optional[str] = None
+    title: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    emails: Optional[List[str]] = None
+    phones: Optional[List[str]] = None
+    experience: Optional[str] = None
+    salary: Optional[str] = None
+    apply_link: Optional[str] = None
+
+
+class BulkIds(BaseModel):
+    ids: List[int]
+
+
+class BulkStatus(BaseModel):
+    ids: List[int]
+    status: str
+
+
+class BulkApply(BaseModel):
+    ids: List[int]
+    resume_id: Optional[int] = None
+    additional_message: Optional[str] = ""
+
+
 class ApplyResponse(BaseModel):
     success: bool
     type: Optional[str] = None
@@ -46,6 +76,39 @@ class ApplyResponse(BaseModel):
 
 class JobStatusUpdate(BaseModel):
     status: str
+
+
+def _send_application_with_retry(builder, attempts: int = 3):
+    """Send an application email, retrying transient failures (network hiccups,
+    Gmail 5xx/429, Groq empty-body fallbacks). Permanent errors come back as the
+    last result. Failed sends never create an Application row, so the dashboard
+    can safely re-Apply them manually."""
+    last = None
+    for i in range(attempts):
+        try:
+            last = builder.send_application()
+        except Exception as e:
+            last = {"success": False, "error": f"{type(e).__name__}: {e}"}
+        if last.get("success"):
+            return last
+        if i < attempts - 1:
+            _time.sleep(2 * (i + 1))
+    return last or {"success": False, "error": "send failed"}
+
+
+def _notify_sent(job, to_email: str = "") -> None:
+    """Fire the 'Application sent' mobile/desktop push. Best-effort."""
+    try:
+        from services.notify import push as _push
+
+        _push(
+            "Application sent ✉️",
+            f"{job.title or 'Job'} at {job.company or 'unknown'}"
+            + (f" → {to_email}" if to_email else ""),
+            "/dashboard",
+        )
+    except Exception:
+        pass
 
 
 @router.post("/jobs")
@@ -139,6 +202,19 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
         _auto_apply_if_enabled(db, job)
         db.commit()
         db.refresh(job)
+
+        # Notify the dashboard (mobile/desktop) that a new job was captured.
+        try:
+            from services.notify import push as _push
+
+            _push(
+                "New job captured 🔔",
+                f"{job.title} at {job.company or 'unknown'}"
+                + (f" — {job.status.replace('_', ' ')}" if job.status != 'pending' else ""),
+                "/dashboard",
+            )
+        except Exception:
+            pass
         return job.to_dict()
 
 
@@ -201,7 +277,7 @@ def list_jobs(
     db: Session = Depends(get_db),
 ):
     cleanup_no_contact(db)
-    purge_old_jobs(db, days=PURGE_DAYS)
+    purge_old_jobs(db)
     query = db.query(Job).order_by(func.coalesce(Job.updated_at, Job.created_at).desc())
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
@@ -218,7 +294,13 @@ def list_jobs(
     jobs = query.all()
     if q:
         ql = q.lower()
-        jobs = [j for j in jobs if ql in (j.title or "").lower() or ql in (j.company or "").lower()]
+        jobs = [j for j in jobs if (
+            ql in (j.title or "").lower()
+            or ql in (j.company or "").lower()
+            or ql in (j.description or "").lower()
+            or any(ql in (e or "").lower() for e in (j.emails or []))
+            or any(ql in " ".join((p or "").split()) for p in (j.phones or []))
+        )]
     if exp and exp != "any":
         lo, hi = EXPERIENCE_BUCKETS.get(exp, (None, None))
         if lo is not None or hi is not None:
@@ -419,7 +501,7 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
                 # Same recruiter/company email already got an application -> manual verify only.
                 job.status = "duplicate"
             else:
-                result = EmailBuilder(job).send_application()
+                result = _send_application_with_retry(EmailBuilder(job))
                 if result.get("success"):
                     job.status = "applied"
                     db.add(Application(
@@ -430,6 +512,7 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
                         type="email",
                         status="sent",
                     ))
+                    _notify_sent(job, result.get("to_email"))
                 elif not job.phones:
                     job.status = "pending"
         elif not job.emails and job.apply_link and not _has_sent(db, job.id, "link_summary"):
@@ -453,6 +536,10 @@ def get_settings(db: Session = Depends(get_db)):
     return {
         "auto_apply": _get_setting(db, "auto_apply", "1") == "1",
         "confirm_before_send": _get_setting(db, "confirm_before_send", "0") in ("1", "true", "yes"),
+        "reminders_enabled": _get_setting(db, "reminders_enabled", "1") in ("1", "true", "yes"),
+        "followup_days": int(_get_setting(db, "followup_days", "3") or "3"),
+        "purge_handled_days": int(_get_setting(db, "purge_handled_days", "5") or "5"),
+        "purge_unapplied_days": int(_get_setting(db, "purge_unapplied_days", "14") or "14"),
     }
 
 
@@ -461,8 +548,92 @@ def update_settings(payload: dict, db: Session = Depends(get_db)):
     _set_setting(db, "auto_apply", "1" if payload.get("auto_apply") else "0")
     if payload.get("confirm_before_send") is not None:
         _set_setting(db, "confirm_before_send", "1" if payload.get("confirm_before_send") else "0")
+    if payload.get("reminders_enabled") is not None:
+        _set_setting(db, "reminders_enabled", "1" if payload.get("reminders_enabled") else "0")
+    for key in ("followup_days", "purge_handled_days", "purge_unapplied_days"):
+        if payload.get(key) is not None:
+            try:
+                val = max(1, int(payload.get(key)))
+            except (TypeError, ValueError):
+                val = 3 if key == "followup_days" else (5 if key == "purge_handled_days" else 14)
+            _set_setting(db, key, str(val))
     db.commit()
     return get_settings(db)
+
+
+@router.post("/jobs/bulk/delete")
+def bulk_delete_jobs(payload: BulkIds, db: Session = Depends(get_db)):
+    """Delete many captured jobs at once (selected rows on the dashboard)."""
+    ids = list(dict.fromkeys(payload.ids))
+    if not ids:
+        return {"success": True, "deleted": 0}
+    jobs = db.query(Job).filter(Job.id.in_(ids)).all()
+    deleted = 0
+    for j in jobs:
+        db.query(Application).filter(Application.job_id == j.id).delete()
+        db.delete(j)
+        deleted += 1
+    db.commit()
+    return {"success": True, "deleted": deleted}
+
+
+@router.post("/jobs/bulk/status")
+def bulk_set_status(payload: BulkStatus, db: Session = Depends(get_db)):
+    """Bulk-move captured jobs to a status (e.g. mark selected as rejected)."""
+    ids = list(dict.fromkeys(payload.ids))
+    if not ids:
+        return {"success": True, "updated": 0}
+    jobs = db.query(Job).filter(Job.id.in_(ids)).all()
+    for j in jobs:
+        j.status = payload.status
+    db.commit()
+    return {"success": True, "updated": len(jobs)}
+
+
+@router.post("/jobs/bulk/apply")
+def bulk_apply_jobs(payload: BulkApply, db: Session = Depends(get_db)):
+    """Apply to many jobs at once (same resume + note for the whole batch).
+    Honors the duplicate-email guard per job; returns per-job results."""
+    ids = list(dict.fromkeys(payload.ids))
+    if not ids:
+        return {"success": True, "results": []}
+    resume_override = _resolve_resume_override(db, payload.resume_id)
+    results = []
+    for jid in ids:
+        job = db.query(Job).filter(Job.id == jid).first()
+        if not job:
+            results.append({"job_id": jid, "success": False, "error": "job not found"})
+            continue
+        if not job.emails:
+            results.append({"job_id": jid, "success": False,
+                            "error": "no email contact (use bulk delete/status instead)"})
+            continue
+        if _email_previously_sent(db, job.emails[0]):
+            results.append({"job_id": jid, "success": False, "duplicate_email": True,
+                            "error": "contact already received an application"})
+            continue
+        builder = EmailBuilder(
+            job,
+            resume_override=resume_override,
+            additional_message=payload.additional_message or "",
+        )
+        result = _send_application_with_retry(builder)
+        if result.get("success"):
+            job.status = "applied"
+            db.add(Application(
+                job_id=job.id,
+                resume_used=result.get("resume_used"),
+                email_sent_to=result.get("to_email"),
+                email_response=result.get("message_id"),
+                type="email",
+                status="sent",
+            ))
+            _notify_sent(job, result.get("to_email"))
+            results.append({"job_id": jid, "success": True, **result})
+            db.commit()
+        else:
+            results.append({"job_id": jid, "success": False, "error": result.get("error", "send failed")})
+    return {"success": True, "results": results}
 
 
 @router.get("/jobs/{job_id}")
@@ -530,7 +701,7 @@ def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = 
                     "duplicate_email": True,
                     "error": "This contact email has already received an application. Confirm to send anyway.",
                 }
-            result = builder.send_application()
+            result = _send_application_with_retry(builder)
             if result.get("success"):
                 job.status = "applied"
                 db.add(Application(
@@ -541,6 +712,7 @@ def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = 
                     type="email",
                     status="sent",
                 ))
+                _notify_sent(job, result.get("to_email"))
                 db.commit()
                 return result
             return result
@@ -593,7 +765,7 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
                 "duplicate_email": True,
                 "error": "This contact email already received an application. Confirm to send anyway.",
             }
-        result = builder.send_application()
+        result = _send_application_with_retry(builder)
         if result.get("success"):
             job.status = "applied"
             db.add(Application(
@@ -604,6 +776,7 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
                 type="email",
                 status="sent",
             ))
+            _notify_sent(job, result.get("to_email"))
             db.commit()
             return result
         return result
@@ -613,15 +786,33 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
 
 
 @router.patch("/jobs/{job_id}")
-def update_job_status(job_id: int, update: JobStatusUpdate, db: Session = Depends(get_db)):
-    """Move a job between statuses (e.g. reject a staged 'ready_to_send' back to
-    'pending', or restore a duplicate to 'pending')."""
+def update_job(job_id: int, edit: JobEdit, db: Session = Depends(get_db)):
+    """Move a job between statuses AND/OR fix captured fields (wrong OCR titles,
+    emails, phones...) before sending. has_email/has_phone are recomputed."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
-    job.status = update.status
-    db.commit()
-    db.refresh(job)
+
+    changed = False
+    if edit.status is not None:
+        job.status = edit.status
+        changed = True
+    for field in ("title", "company", "location", "description", "experience", "salary", "apply_link"):
+        value = getattr(edit, field)
+        if value is not None:
+            setattr(job, field, str(value).strip() if isinstance(value, str) else value)
+            changed = True
+    if edit.emails is not None:
+        job.emails = [e.strip() for e in edit.emails if (e or "").strip()]
+        changed = True
+    if edit.phones is not None:
+        job.phones = [p.strip() for p in edit.phones if (p or "").strip()]
+        changed = True
+    if changed:
+        job.has_email = len(job.emails or []) > 0
+        job.has_phone = len(job.phones or []) > 0
+        db.commit()
+        db.refresh(job)
     return job.to_dict()
 
 
@@ -655,19 +846,29 @@ def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
     return count
 
 
-PURGE_DAYS = 5
-
-
-def purge_old_jobs(db: Session, days: int = PURGE_DAYS) -> int:
-    """Auto-erase ALL dashboard jobs older than `days` (the user's retention rule).
-    Applications for those jobs go with them (keeps Postgres FK clean)."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = db.query(Job).filter(Job.created_at < cutoff, Job.status != "no_contact").all()
+def purge_old_jobs(db: Session) -> int:
+    """Retention rules:
+    - handled jobs (applied / phone_summary_sent / link_email_sent) auto-delete
+      after `purge_handled_days` (default 5) — they're done.
+    - unapplied jobs (pending / ready_to_send / duplicate / apply_link) auto-delete
+      after `purge_unapplied_days` (default 14) — long-enough to act on them.
+    - no_contact is cleaned separately at 24h (cleanup_no_contact).
+    Applied history is therefore NOT kept; the dashboard self-cleans."""
+    handled_days = int(_get_setting(db, "purge_handled_days", "5") or "5")
+    unapplied_days = int(_get_setting(db, "purge_unapplied_days", "14") or "14")
     count = 0
-    for j in rows:
-        db.query(Application).filter(Application.job_id == j.id).delete()
-        db.delete(j)
-        count += 1
+
+    def _purge(days: int, statuses: list):
+        nonlocal count
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        rows = db.query(Job).filter(Job.status.in_(statuses), Job.created_at < cutoff).all()
+        for j in rows:
+            db.query(Application).filter(Application.job_id == j.id).delete()
+            db.delete(j)
+            count += 1
+
+    _purge(handled_days, ["applied", "phone_summary_sent", "link_email_sent"])
+    _purge(unapplied_days, ["pending", "ready_to_send", "duplicate", "apply_link"])
     if count:
         db.commit()
     return count

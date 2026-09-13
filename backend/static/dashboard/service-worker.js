@@ -1,4 +1,4 @@
-const CACHE = 'jaa-shell-v4';
+const CACHE = 'jaa-shell-v5';
 const PRECACHE = [
   '/static/dashboard/index.html',
   '/static/dashboard/manifest.webmanifest',
@@ -18,6 +18,40 @@ self.addEventListener('activate', (e) => {
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
+  );
+});
+
+// Web push: show a real OS notification even when the dashboard is closed.
+self.addEventListener('push', (e) => {
+  let data = { title: 'Job Auto-Apply', body: '', url: '/dashboard' };
+  try {
+    if (e.data) {
+      const j = e.data.json();
+      data = Object.assign({}, data, j);
+    }
+  } catch (err) {}
+
+  const options = {
+    body: data.body || '',
+    icon: '/static/dashboard/icons/icon-192.png',
+    badge: '/static/dashboard/icons/icon-192.png',
+    tag: 'jaa-' + Date.now(),
+    data: { url: data.url || '/dashboard' }
+  };
+  e.waitUntil(self.registration.showNotification(data.title || 'Job Auto-Apply', options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  const url = (e.notification.data && e.notification.data.url) || '/dashboard';
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const c of windowClients) {
+        const cu = new URL(c.url);
+        if (cu.origin === location.origin && 'focus' in c) { c.navigate(url); return c.focus(); }
+      }
+      return clients.openWindow(url);
+    })
   );
 });
 

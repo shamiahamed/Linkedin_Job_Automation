@@ -18,6 +18,13 @@ _ADDITIONS = [
     ("jobs", "has_email", "BOOLEAN"),
     ("jobs", "has_phone", "BOOLEAN"),
     ("jobs", "updated_at", "TIMESTAMPTZ DEFAULT now()"),
+    ("applications", "follow_up_at", "TIMESTAMPTZ"),
+    ("applications", "followed_up_at", "TIMESTAMPTZ"),
+    ("applications", "outcome", "VARCHAR(20)"),
+    ("applications", "notes", "TEXT"),
+    ("push_subscriptions", "p256dh", "VARCHAR(255)"),
+    ("push_subscriptions", "auth", "VARCHAR(255)"),
+    ("push_subscriptions", "created_at", "TIMESTAMPTZ DEFAULT now()"),
 ]
 
 # (table, column, sql type) — widen existing columns (SQLite ignores lengths so
@@ -32,6 +39,16 @@ def migrate(engine) -> None:
         return
     try:
         with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS push_subscriptions ("
+                    "id SERIAL PRIMARY KEY, "
+                    "endpoint VARCHAR(500) NOT NULL UNIQUE, "
+                    "p256dh VARCHAR(255) NOT NULL, "
+                    "auth VARCHAR(255) NOT NULL, "
+                    "created_at TIMESTAMPTZ DEFAULT now())"
+                )
+            )
             for table, column, sql_type in _ADDITIONS:
                 conn.execute(
                     text(

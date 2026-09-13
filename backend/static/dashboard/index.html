@@ -64,6 +64,7 @@
                 <span id="connDot" class="w-2.5 h-2.5 rounded-full bg-green-500 ml-1"></span>
             </div>
             <div class="flex items-center gap-2">
+                <button id="notifyBtn" onclick="toggleNotifications()" class="hidden text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">🔔 Notifications</button>
                 <button id="installBtn" onclick="installPwa()" class="hidden text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">⤓ Install App</button>
                 <button onclick="openResumes()" class="text-xs font-medium text-gray-700 bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5">🗂 Resumes</button>
                 <button onclick="openSettings()" title="Settings" class="text-gray-600 hover:bg-gray-100 rounded-lg w-9 h-9 flex items-center justify-center text-lg">⚙️</button>
@@ -163,6 +164,15 @@
 
         <!-- Jobs -->
         <section id="jobsWrap">
+            <div id="bulkBar" class="hidden card p-3 bg-blue-50 border border-blue-200">
+                <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-semibold text-blue-800">☑️ <b id="bulkCount">0</b> selected</p>
+                    <button onclick="bulkApply()" class="text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-1.5">Apply to selected</button>
+                    <button onclick="bulkDelete()" class="text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-md px-3 py-1.5">Delete selected</button>
+                    <button onclick="bulkStatus('rejected')" class="text-xs font-medium bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md px-3 py-1.5">Mark rejected</button>
+                    <button onclick="bulkClear()" class="text-xs text-blue-600 hover:text-blue-800 ml-auto font-medium">Clear</button>
+                </div>
+            </div>
             <div id="jobsLoading" class="card p-10 text-center text-gray-400 text-sm">Loading jobs…</div>
             <div id="jobsGrid" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3"></div>
             <div id="jobsEmpty" class="hidden card p-10 text-center text-gray-400 text-sm"></div>
@@ -201,6 +211,51 @@
                     <button onclick="confirmSend()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md py-2.5">Send application ✉️</button>
                     <button onclick="rejectConfirm()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-md py-2">Don't send — keep as pending</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit job modal -->
+    <div id="editModal" class="modal hidden fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="modal-panel bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-bold text-gray-800">✏️ Edit captured job</h3>
+                <button onclick="closeModal('editModal')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 space-y-3 text-sm">
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Title</label>
+                    <input id="edTitle" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Company</label>
+                    <input id="edCompany" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Location</label>
+                    <input id="edLocation" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Emails (comma-separated)</label>
+                    <input id="edEmails" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Phones (comma-separated)</label>
+                    <input id="edPhones" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Experience</label>
+                    <input id="edExperience" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Salary</label>
+                    <input id="edSalary" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-medium text-gray-600 block mb-1">Apply link</label>
+                    <input id="edApplyLink" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                </div>
+                <button onclick="saveJobEdit()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md py-2.5">Save changes</button>
             </div>
         </div>
     </div>
@@ -250,6 +305,30 @@
                         <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
                     </button>
                 </div>
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <p class="font-medium text-gray-800">Daily reminders (push + email)</p>
+                        <p class="text-xs text-gray-500">~9:00 AM — unapplied jobs, auto-delete warnings, follow-ups due.</p>
+                    </div>
+                    <button onclick="toggleSetting('reminders_enabled')" id="sw_reminders_enabled" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
+                        <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+                    </button>
+                </div>
+                <div class="grid grid-cols-3 gap-2 pt-1">
+                    <div>
+                        <label class="text-xs font-medium text-gray-600 block mb-1">Follow-up due (days)</label>
+                        <input id="st_followup_days" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-600 block mb-1">Delete applied (days)</label>
+                        <input id="st_purge_handled" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-600 block mb-1">Delete unapplied (days)</label>
+                        <input id="st_purge_unapplied" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                    </div>
+                </div>
+                <button onclick="saveRetentionSettings()" class="w-full bg-gray-800 hover:bg-gray-900 text-white rounded-md py-2 text-sm font-medium">Save retention settings</button>
                 <div class="border-t border-gray-100 pt-4">
                     <p class="font-medium text-gray-800 mb-1">Profile</p>
                     <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
@@ -276,10 +355,14 @@
 
     <script>
         const API = location.origin;
-        let _settings = { auto_apply: true, confirm_before_send: false };
+        let _settings = { auto_apply: true, confirm_before_send: false, reminders_enabled: true,
+                          followup_days: 3, purge_handled_days: 5, purge_unapplied_days: 14 };
         let _filters = { status: 'all', exp: 'any', q: '' };
         let _confirmJob = null;
         let _resumesCache = [];
+        let _selected = new Set();
+        let _editJob = null;
+        let _appsCache = [];
 
         /* ============ auth / api ============ */
         function showLogin() {
@@ -476,6 +559,7 @@
             try {
                 const res = await api('/api/jobs' + qp);
                 const jobs = await res.json();
+                await refreshAppsCache();
                 renderJobs(jobs);
             } catch (e) {
                 document.getElementById('jobsLoading').classList.add('hidden');
@@ -496,14 +580,29 @@
                 empty.textContent = _filters.status === 'all' && !_filters.q
                     ? 'No jobs captured yet. Capture a LinkedIn post above, or on your phone paste/share a post.'
                     : 'Nothing matches this filter.';
+                _selected.clear(); updateBulkBar();
                 return;
             }
+            // Reconcile selection with what's actually on screen.
+            const ids = new Set(jobs.map(j => j.id));
+            [..._selected].forEach(id => { if (!ids.has(id)) _selected.delete(id); });
             empty.classList.add('hidden');
             grid.classList.remove('hidden');
-            grid.innerHTML = jobs.map(job => `
+            grid.innerHTML = jobs.map(job => {
+                const app = (_appsCache || []).find(a => a.job_id === job.id);
+                const outcome = app && app.outcome ? app.outcome : null;
+                const followed = app && app.followed_up_at;
+                const outcomeChip = outcome
+                    ? { interview: 'bg-purple-100 text-purple-700', rejected: 'bg-gray-200 text-gray-600',
+                        offer: 'bg-emerald-100 text-emerald-700', ghosted: 'bg-rose-100 text-rose-700' }[outcome] || ''
+                    : '';
+                return `
                 <div class="card p-4 flex flex-col gap-2 ${job.status === 'ready_to_send' ? 'ring-2 ring-blue-200' : ''}">
                     <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
+                        <label class="flex items-center gap-2 cursor-pointer shrink-0">
+                            <input type="checkbox" class="accent-blue-600 w-4 h-4" onclick="toggleSelect(${job.id})" ${_selected.has(job.id) ? 'checked' : ''}>
+                        </label>
+                        <div class="min-w-0 flex-1">
                             <p class="font-semibold text-gray-800 leading-snug">${esc(job.title || 'Untitled')}</p>
                             <p class="text-sm text-gray-500 truncate">${job.company ? esc(job.company) : '<span class="text-gray-400">unknown company</span>'}${job.location ? ' · ' + esc(job.location) : ''}</p>
                         </div>
@@ -514,20 +613,29 @@
                         <span>🎯 ${compactExp(job)}${job.salary ? ' · 💰 ' + esc(job.salary) : ''}</span>
                         <span class="flex items-center gap-1">${isNew(job) ? '<span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" title="captured recently"></span>' : ''}${timeAgo(job.created_at)}${isEdited(job) ? '<span class="text-gray-400 opacity-80">· edited ' + timeAgo(job.updated_at) + '</span>' : ''}</span>
                     </p>
+                    ${outcome ? `<p><span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${outcomeChip}">${outcome}</span></p>` : ''}
                     <div class="flex items-center gap-2 pt-1 flex-wrap">
+                        ${job.status === 'applied' ?
+                            (outcome ? '' : `<button onclick="setJobOutcome(${job.id},'interview')" class="text-purple-600 hover:text-purple-800 text-xs font-medium border border-purple-200 bg-purple-50 rounded-md px-3 py-2" title="Mark interview">🎤 Interview</button>
+                             <button onclick="setJobOutcome(${job.id},'offer')" class="text-emerald-600 hover:text-emerald-800 text-xs font-medium border border-emerald-200 bg-emerald-50 rounded-md px-3 py-2" title="Mark offer">🎉 Offer</button>
+                             <button onclick="setJobOutcome(${job.id},'rejected')" class="text-gray-500 hover:text-gray-700 text-xs font-medium border border-gray-200 bg-gray-50 rounded-md px-3 py-2" title="Mark rejected">✖ Rejected</button>
+                             <button onclick="setJobOutcome(${job.id},'ghosted')" class="text-rose-500 hover:text-rose-700 text-xs font-medium border border-rose-200 bg-rose-50 rounded-md px-3 py-2" title="Mark no response">👻 Ghosted</button>`)
+                            : ''}
+                        ${job.status === 'applied' && !outcome ? `<button onclick="followUpJob(${job.id})" class="text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 bg-blue-50 rounded-md px-3 py-2">${followed ? 'Follow-up again ➤' : '✉️ Follow-up'}</button>` : ''}
                         ${job.status === 'ready_to_send' ?
                             `<button onclick="openConfirmModal(${job.id})" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md px-3 py-2">Confirm & send ✉️</button>` :
-                            (job.emails && job.emails.length ?
+                            (job.emails && job.emails.length && job.status !== 'applied' ?
                                 `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 bg-blue-50 rounded-md px-3 py-2">📧 Apply</button>` :
                                 (job.phones && job.phones.length ?
                                     `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 bg-orange-50 rounded-md px-3 py-2">📞 Summary</button>` : ''))}
                         ${job.apply_link && !(job.emails && job.emails.length) ? `<a href="${esc(job.apply_link)}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 text-xs font-medium border border-teal-200 bg-teal-50 rounded-md px-3 py-2">🔗 Open link</a>` : ''}
+                        <button onclick="openEditModal(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Edit fields">✏️</button>
                         <button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Details">👁</button>
                         ${job.status === 'applied' ? `<button onclick="setJobStatus(${job.id},'ready_to_send')" class="text-blue-500 hover:text-blue-700 text-xs font-medium rounded-md px-2 py-2" title="Reopen Confirm & send with resume chooser">↩ Stage</button>` : ''}
                         ${job.status === 'duplicate' ? `<button onclick="setJobStatus(${job.id},'pending')" class="text-amber-600 hover:text-amber-800 text-xs font-medium rounded-md px-2 py-2" title="Treat as new opening">↩ Un-dup</button>` : ''}
                         <button onclick="deleteJob(${job.id})" class="text-red-400 hover:text-red-600 text-xs rounded-md px-2 py-2 ml-auto" title="Delete">🗑</button>
                     </div>
-                </div>`).join('');
+                </div>`}).join('');
         }
 
         async function setJobStatus(id, status) {
@@ -548,8 +656,157 @@
             try {
                 const res = await api('/api/jobs/' + id, { method: 'DELETE' });
                 if (!res.ok) { showToast('Delete failed', true); return; }
-                showToast('Job deleted'); loadJobs(); fetchStats();
+                showToast('Job deleted'); _selected.delete(id); updateBulkBar(); loadJobs(); fetchStats();
             } catch (e) { showToast('Delete failed', true); }
+        }
+
+        /* ============ bulk actions ============ */
+        function toggleSelect(id) {
+            if (_selected.has(id)) _selected.delete(id); else _selected.add(id);
+            updateBulkBar();
+        }
+
+        function updateBulkBar() {
+            const bar = document.getElementById('bulkBar');
+            document.getElementById('bulkCount').textContent = _selected.size;
+            bar.classList.toggle('hidden', !_selected.size);
+        }
+
+        function bulkClear() {
+            _selected.clear();
+            updateBulkBar();
+            loadJobs();
+        }
+
+        async function bulkDelete() {
+            if (!_selected.size) return;
+            if (!confirm(`Delete ${_selected.size} job(s)? This cannot be undone.`)) return;
+            try {
+                const res = await api('/api/jobs/bulk/delete', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: [..._selected] })
+                });
+                const d = await res.json();
+                if (!res.ok || !d.success) throw new Error('failed');
+                showToast(`Deleted ${d.deleted} job(s)`);
+                _selected.clear(); updateBulkBar(); loadJobs(); fetchStats();
+            } catch (e) { showToast('Bulk delete failed', true); }
+        }
+
+        async function bulkApply() {
+            if (!_selected.size) return;
+            const ids = [..._selected];
+            if (!confirm(`Apply to ${ids.length} job(s)? Only jobs with unfired email contacts will send.`)) return;
+            const btn = document.querySelector('#bulkBar button');
+            const original = btn.textContent;
+            btn.disabled = true; btn.textContent = 'Applying…';
+            try {
+                const res = await api('/api/jobs/bulk/apply', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                const d = await res.json();
+                let ok = 0, dup = 0, fail = 0;
+                (d.results || []).forEach(r => { if (r.success) ok++; else if (r.duplicate_email) dup++; else fail++; });
+                showToast(`Applied ${ok}, skipped ${dup} (already sent), failed ${fail}`, fail > 0);
+                _selected.clear(); updateBulkBar(); loadJobs(); fetchStats();
+            } catch (e) { showToast('Bulk apply failed', true); }
+            btn.disabled = false; btn.textContent = original;
+        }
+
+        async function bulkStatus(status) {
+            if (!_selected.size) return;
+            if (!confirm(`Mark ${_selected.size} job(s) as '${status}'?`)) return;
+            try {
+                const res = await api('/api/jobs/bulk/status', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: [..._selected], status })
+                });
+                const d = await res.json();
+                if (!res.ok || !d.success) throw new Error('failed');
+                showToast(`Status updated on ${d.updated} job(s)`);
+                _selected.clear(); updateBulkBar(); loadJobs(); fetchStats();
+            } catch (e) { showToast('Bulk status failed', true); }
+        }
+
+        /* ============ edit captured fields ============ */
+        async function openEditModal(id) {
+            try {
+                const job = await (await api('/api/jobs/' + id)).json();
+                _editJob = job;
+                document.getElementById('edTitle').value = job.title || '';
+                document.getElementById('edCompany').value = job.company || '';
+                document.getElementById('edLocation').value = job.location || '';
+                document.getElementById('edEmails').value = (job.emails || []).join(', ');
+                document.getElementById('edPhones').value = (job.phones || []).join(', ');
+                document.getElementById('edExperience').value = job.experience || '';
+                document.getElementById('edSalary').value = job.salary || '';
+                document.getElementById('edApplyLink').value = job.apply_link || '';
+                openModal('editModal');
+            } catch (e) { showToast('Could not load job', true); }
+        }
+
+        async function saveJobEdit() {
+            if (!_editJob) return;
+            const split = v => (v || '').split(',').map(s => s.trim()).filter(Boolean);
+            const body = {
+                title: document.getElementById('edTitle').value.trim(),
+                company: document.getElementById('edCompany').value.trim(),
+                location: document.getElementById('edLocation').value.trim(),
+                emails: split(document.getElementById('edEmails').value),
+                phones: split(document.getElementById('edPhones').value),
+                experience: document.getElementById('edExperience').value.trim(),
+                salary: document.getElementById('edSalary').value.trim(),
+                apply_link: document.getElementById('edApplyLink').value.trim()
+            };
+            try {
+                const res = await api('/api/jobs/' + _editJob.id, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                if (!res.ok) throw new Error('failed');
+                showToast('Job updated — preview it before sending');
+                closeModal('editModal'); _editJob = null; loadJobs(); fetchStats();
+            } catch (e) { showToast('Save failed', true); }
+        }
+
+        /* ============ follow-up + outcomes ============ */
+        function appRowFor(jobId) {
+            return (_appsCache || []).find(a => a.job_id === jobId);
+        }
+
+        async function followUpJob(jobId) {
+            const app = appRowFor(jobId);
+            if (!app || !app.id) { showToast('No sent application found for this job', true); return; }
+            if (!confirm('Send a polite AI follow-up to the recruiter?')) return;
+            try {
+                const res = await api('/api/applications/' + app.id + '/followup', { method: 'POST' });
+                const d = await res.json();
+                if (d.success) showToast('Follow-up sent');
+                else showToast((d.error || 'Follow-up failed').replace(/^Error: /, ''), true);
+                refreshAppsCache(); loadJobs();
+            } catch (e) { showToast('Follow-up failed', true); }
+        }
+
+        async function setJobOutcome(jobId, outcome) {
+            const app = appRowFor(jobId);
+            if (!app || !app.id) { showToast('No sent application found', true); return; }
+            const val = app.outcome === outcome ? '' : outcome; // re-click clears
+            try {
+                const res = await api('/api/applications/' + app.id, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ outcome: val })
+                });
+                if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'failed'); }
+                showToast(val ? `Marked ${outcome}` : 'Outcome cleared');
+                refreshAppsCache(); loadJobs(); fetchStats();
+            } catch (e) { showToast('Outcome update failed', true); }
+        }
+
+        async function refreshAppsCache() {
+            try {
+                const res = await api('/api/applications');
+                if (res.ok) { _appsCache = await res.json(); }
+            } catch (e) {}
         }
 
         function viewJob(id) {
@@ -779,7 +1036,26 @@
                 _settings = Object.assign({}, _settings, s);
                 setSwitch('sw_auto_apply', !!s.auto_apply);
                 setSwitch('sw_confirm_before_send', !!s.confirm_before_send);
+                setSwitch('sw_reminders_enabled', !!s.reminders_enabled);
+                document.getElementById('st_followup_days').value = s.followup_days;
+                document.getElementById('st_purge_handled').value = s.purge_handled_days;
+                document.getElementById('st_purge_unapplied').value = s.purge_unapplied_days;
             } catch (e) { /* backend offline */ }
+        }
+
+        async function saveRetentionSettings() {
+            const body = {
+                followup_days: Number(document.getElementById('st_followup_days').value) || 3,
+                purge_handled_days: Number(document.getElementById('st_purge_handled').value) || 5,
+                purge_unapplied_days: Number(document.getElementById('st_purge_unapplied').value) || 14
+            };
+            try {
+                await api('/api/settings', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                showToast('Settings saved');
+                loadSettings();
+            } catch (e) { showToast('Could not save settings', true); }
         }
 
         async function toggleSetting(key) {
@@ -987,6 +1263,85 @@
             document.getElementById('installBtn').classList.add('hidden');
         }
 
+        /* ============ push notifications ============ */
+        function urlBase64ToUint8Array(base64Str) {
+            const padding = '='.repeat((4 - base64Str.length % 4) % 4);
+            const base64 = (base64Str + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const raw = atob(base64);
+            const arr = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+            return arr;
+        }
+
+        async function getSubscription() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                return await reg.pushManager.getSubscription();
+            } catch (e) { return null; }
+        }
+
+        let _notifyState = null; // null=unknown, true=on, false=off
+        async function refreshNotifyButton() {
+            const btn = document.getElementById('notifyBtn');
+            if (!('Notification' in window) || !('PushManager' in window)) { btn.classList.add('hidden'); return; }
+            const sub = await getSubscription();
+            const supported = 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost');
+            if (!supported) { btn.classList.add('hidden'); return; }
+            _notifyState = !!(sub && Notification.permission === 'granted');
+            btn.classList.remove('hidden');
+            btn.textContent = _notifyState ? '🔔 Send test' : '🔔 Enable notifications';
+            btn.className = 'text-xs font-medium rounded-lg px-3 py-1.5 ' +
+                (_notifyState ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
+                              : 'text-blue-700 bg-blue-50 border border-blue-200');
+        }
+
+        async function toggleNotifications() {
+            if (_notifyState) {
+                // Already on -> send a test push to confirm.
+                try {
+                    await api('/api/push/test', { method: 'POST' });
+                    showToast('Test push sent');
+                } catch (e) { showToast('Could not send test push', true); }
+                return;
+            }
+            try {
+                const perm = await Notification.requestPermission();
+                if (perm !== 'granted') { showToast('Notification permission denied', true); return; }
+                const keyRes = await api('/api/push/vapid-key');
+                const { publicKey } = await keyRes.json();
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(publicKey)
+                });
+                await api('/api/push/register', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sub.toJSON())
+                });
+                await api('/api/push/test', { method: 'POST' });
+                await refreshNotifyButton();
+                showToast('Notifications enabled — test sent ✓');
+            } catch (e) {
+                showToast('Could not enable notifications: ' + e.message, true);
+            }
+        }
+
+        async function disableNotifications() {
+            try {
+                const sub = await getSubscription();
+                if (sub) {
+                    await api('/api/push/unregister', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ endpoint: sub.endpoint })
+                    });
+                    await sub.unsubscribe();
+                }
+                showToast('Notifications disabled');
+                await refreshNotifyButton();
+            } catch (e) { showToast('Could not disable', true); }
+        }
+
         function handleShareTarget() {
             const params = new URLSearchParams(location.search);
             if (params.get('shared')) {
@@ -1034,6 +1389,7 @@
             updateOfflineUI();
             configureRefresh();
             handleShareTarget();
+            refreshNotifyButton();
             try {
                 const me = await fetch(API + '/api/auth/me', { credentials: 'same-origin' });
                 const j = await me.json();

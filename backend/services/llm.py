@@ -259,3 +259,41 @@ def draft_subject(job, additional_message: str = "") -> str:
         return _subject_cache[key]
     except Exception:
         return None
+
+
+_followup_cache = {}
+
+
+def draft_followup(job, applied_date: str = "", extra: str = "") -> str:
+    """Return a short, polite follow-up email body (plain text) for a job the user
+    already applied to, or None on failure. extra is a direct instruction (e.g.
+    'mention you are still interested')."""
+    if not _enabled() or not job:
+        return None
+    key = f"{job.title or ''}|{job.company or ''}|{applied_date}|{extra}"
+    if key in _followup_cache:
+        return _followup_cache[key]
+    title = (job.title or "").strip() or "the position"
+    company = (job.company or "").strip() or "your company"
+    applied_line = f"I submitted my application on {applied_date}." if applied_date else "I recently submitted my application."
+    extra_line = f"\nThe applicant's instruction: {extra}" if extra else ""
+    prompt = (
+        f"Write a short, polite job-application follow-up email body (plain text, "
+        f"3-4 sentences) for the role '{title}' at '{company}'. {applied_line} Ask "
+        f"for a brief update on the status, keep the tone professional and not pushy, "
+        f"and do not repeat the whole cover letter.{extra_line}\n"
+        f"RULES:\n"
+        f"- First line MUST be: Dear HR,\n"
+        f"- End with the sentence: Thank you for your time.\n"
+        f"- Do NOT include a sign-off or signature (added by the system).\n"
+        f"- Do NOT use filler like 'I hope this email finds you well'.\n"
+        f"Return ONLY the email body plain text."
+    )
+    try:
+        text = _chat([{"role": "user", "content": prompt}], max_tokens=400)
+        text = (text or "").strip()
+        text = re.sub(r"^\"|\"$", "", text)
+        _followup_cache[key] = text or None
+        return _followup_cache[key]
+    except Exception:
+        return None

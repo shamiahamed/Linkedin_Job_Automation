@@ -56,6 +56,10 @@ class Application(Base):
     email_response = Column(Text, nullable=True)
     type = Column(String(20), default="email")
     status = Column(String(20), default="sent")
+    follow_up_at = Column(DateTime(timezone=True), nullable=True)
+    followed_up_at = Column(DateTime(timezone=True), nullable=True)
+    outcome = Column(String(20), nullable=True)
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def to_dict(self):
@@ -67,6 +71,10 @@ class Application(Base):
             "email_response": self.email_response,
             "type": self.type,
             "status": self.status,
+            "follow_up_at": self.follow_up_at.isoformat() if self.follow_up_at else None,
+            "followed_up_at": self.followed_up_at.isoformat() if self.followed_up_at else None,
+            "outcome": self.outcome,
+            "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -101,5 +109,25 @@ class Resume(Base):
             "mime": self.mime,
             "label": self.label,
             "is_default": self.is_default,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PushSubscription(Base):
+    """Browser/service-worker push subscriptions for mobile + desktop
+    notifications (Web Push). Registered from the dashboard PWA."""
+
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    endpoint = Column(String(500), nullable=False, unique=True)
+    p256dh = Column(String(255), nullable=False)
+    auth = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "endpoint": self.endpoint,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
