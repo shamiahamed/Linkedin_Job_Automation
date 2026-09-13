@@ -314,8 +314,13 @@ def list_jobs(
     hit = _jobs_cache.get("key")
     if hit == key and _time.monotonic() - _jobs_cache["ts"] < 5.0:
         return _jobs_cache["data"]
-    cleanup_no_contact(db)
-    purge_old_jobs(db)
+    try:
+        cleanup_no_contact(db)
+        purge_old_jobs(db)
+    except Exception:
+        # A dropped DB connection here must never 500 the dashboard list;
+        # the periodic loop retries housekeeping anyway.
+        pass
     query = db.query(Job).order_by(func.coalesce(Job.updated_at, Job.created_at).desc())
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
