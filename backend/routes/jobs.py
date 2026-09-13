@@ -21,6 +21,20 @@ router = APIRouter(prefix="/api", tags=["jobs"])
 # content-dedupe check (each inserts before the other is committed).
 _CREATE_LOCK = threading.Lock()
 
+# Short TTL cache for GET /jobs (see list_jobs). Keyed by query params.
+_jobs_cache = {"key": None, "ts": 0.0, "data": None}
+
+
+def _invalidate_jobs_cache():
+    _jobs_cache["key"] = None
+
+
+def _cache_jobs(key, items):
+    _jobs_cache["key"] = key
+    _jobs_cache["ts"] = _time.monotonic()
+    _jobs_cache["data"] = items
+    return items
+
 
 class JobCreate(BaseModel):
     title: str
@@ -113,6 +127,7 @@ def _notify_sent(job, to_email: str = "") -> None:
 
 @router.post("/jobs")
 def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
+    _invalidate_jobs_cache()
     with _CREATE_LOCK:
         # Optional Groq refinement for weak captures (generic title, or a post with
         # no email/phone/link — typically image posts). Errors are swallowed, so the
@@ -227,6 +242,7 @@ class TextCapture(BaseModel):
 def create_job_from_text(payload: TextCapture, db: Session = Depends(get_db)):
     """Mobile/paste capture: raw LinkedIn post text -> LLM extraction -> the same
     create/dedupe/gate/auto-apply flow the extension uses."""
+    _invalidate_jobs_cache()
     text = (payload.text or "").strip()
     if len(text) < 30:
         raise HTTPException(400, "Pasted text is too short to be a job post")
@@ -276,6 +292,12 @@ def list_jobs(
     since: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    # Short TTL cache: repeated dashboard reloads skip the DB round-trip
+    # (Neon cold-start latency is what makes the UI feel slow).
+    key = (status or "", exp or "", source or "", q or "", since or "")
+    hit = _jobs_cache.get("key")
+    if hit == key and _time.monotonic() - _jobs_cache["ts"] < 5.0:
+        return _jobs_cache["data"]
     cleanup_no_contact(db)
     purge_old_jobs(db)
     query = db.query(Job).order_by(func.coalesce(Job.updated_at, Job.created_at).desc())
@@ -311,7 +333,7 @@ def list_jobs(
                     and (hi is None or m <= hi))(
                     _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}"))
             ]
-    return [j.to_dict() for j in jobs]
+    return _cache_jobs(key, [j.to_dict() for j in jobs])
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
@@ -564,6 +586,7 @@ def update_settings(payload: dict, db: Session = Depends(get_db)):
 @router.post("/jobs/bulk/delete")
 def bulk_delete_jobs(payload: BulkIds, db: Session = Depends(get_db)):
     """Delete many captured jobs at once (selected rows on the dashboard)."""
+    _invalidate_jobs_cache()
     ids = list(dict.fromkeys(payload.ids))
     if not ids:
         return {"success": True, "deleted": 0}
@@ -580,6 +603,7 @@ def bulk_delete_jobs(payload: BulkIds, db: Session = Depends(get_db)):
 @router.post("/jobs/bulk/status")
 def bulk_set_status(payload: BulkStatus, db: Session = Depends(get_db)):
     """Bulk-move captured jobs to a status (e.g. mark selected as rejected)."""
+    _invalidate_jobs_cache()
     ids = list(dict.fromkeys(payload.ids))
     if not ids:
         return {"success": True, "updated": 0}
@@ -594,6 +618,7 @@ def bulk_set_status(payload: BulkStatus, db: Session = Depends(get_db)):
 def bulk_apply_jobs(payload: BulkApply, db: Session = Depends(get_db)):
     """Apply to many jobs at once (same resume + note for the whole batch).
     Honors the duplicate-email guard per job; returns per-job results."""
+    _invalidate_jobs_cache()
     ids = list(dict.fromkeys(payload.ids))
     if not ids:
         return {"success": True, "results": []}
@@ -677,6 +702,7 @@ def preview_application(job_id: int, payload: dict = Body(default=None), db: Ses
 
 @router.post("/jobs/{job_id}/apply", response_model=ApplyResponse)
 def apply_to_job(job_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    _invalidate_jobs_cache()
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
@@ -744,6 +770,7 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
     """User pressed 'Confirm' on the dashboard for a staged 'ready_to_send' job.
     Sends the application email (optionally with a specific uploaded resume and
     a manual resume-pin) and marks the job applied."""
+    _invalidate_jobs_cache()
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
@@ -789,6 +816,7 @@ def confirm_and_send(job_id: int, payload: dict = Body(default=None), db: Sessio
 def update_job(job_id: int, edit: JobEdit, db: Session = Depends(get_db)):
     """Move a job between statuses AND/OR fix captured fields (wrong OCR titles,
     emails, phones...) before sending. has_email/has_phone are recomputed."""
+    _invalidate_jobs_cache()
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
@@ -818,6 +846,7 @@ def update_job(job_id: int, edit: JobEdit, db: Session = Depends(get_db)):
 
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: int, db: Session = Depends(get_db)):
+    _invalidate_jobs_cache()
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")

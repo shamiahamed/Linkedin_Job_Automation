@@ -12,6 +12,11 @@ import logging
 logger = logging.getLogger("uvicorn.error")
 
 
+def _b64u_decode(s):
+    pad = "=" * ((4 - len(s) % 4) % 4)
+    return base64.urlsafe_b64decode((s + pad).replace("-", "+").replace("_", "/"))
+
+
 def _db():
     from database import SessionLocal
     return SessionLocal()
@@ -35,33 +40,36 @@ def _set_setting(db, key, value):
 def _vapid_keys():
     """Return (public, private) VAPID keys, generating + persisting on first call.
     public is the base64url 65-byte uncompressed P-256 point (the browser's
-    applicationServerKey); private is a PKCS8 PEM (for signing/webpush)."""
+    applicationServerKey); private is the base64url raw 32-byte P-256 scalar,
+    which py_vapid's Vapid01.from_raw() can rebuild for signing."""
     db = _db()
     try:
         pub = _get_setting(db, "vapid_pub", "")
         priv = _get_setting(db, "vapid_priv", "")
         if pub and priv:
-            return pub, priv
+            try:
+                if len(_b64u_decode(priv)) == 32:
+                    return pub, priv
+            except Exception:
+                pass
+            # Legacy PEM-encoded key (py_vapid parser can't load PKCS8 ECDSA). Regenerate.
 
         import base64
         from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives import serialization
 
         key = ec.generate_private_key(ec.SECP256R1())
-        priv_pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        ).decode("ascii")
+        raw_scalar = key.private_numbers().private_value.to_bytes(32, "big")
         pub_point = key.public_key().public_bytes(
             serialization.Encoding.X962,
             serialization.PublicFormat.UncompressedPoint,  # 65 bytes (0x04 || X || Y)
         )
         pub = base64.urlsafe_b64encode(pub_point).rstrip(b"=").decode("ascii")
+        priv = base64.urlsafe_b64encode(raw_scalar).rstrip(b"=").decode("ascii")
         _set_setting(db, "vapid_pub", pub)
-        _set_setting(db, "vapid_priv", priv_pem)
+        _set_setting(db, "vapid_priv", priv)
         db.commit()
-        return pub, priv_pem
+        return pub, priv
     except Exception:
         logger.exception("VAPID key generation failed")
         return None, None
@@ -86,10 +94,14 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
 
         from config import Config
         from pywebpush import webpush, WebPushException
+        from py_vapid import Vapid01
+
+        # Rebuild a signer from the raw scalar; pywebpush accepts a Vapid01
+        # instance directly and skips its Parser (which rejects PKCS8 PEM).
+        vv = Vapid01.from_raw(_b64u_decode(priv))
 
         claims = {
             "sub": f"mailto:{Config.YOUR_EMAIL or 'admin@localhost'}",
-            "aud": "",
         }
         sent = 0
         stale = []
@@ -101,7 +113,7 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
                         "keys": {"p256dh": s.p256dh, "auth": s.auth},
                     },
                     data={"title": title, "body": body, "url": url, "icon": icon},
-                    vapid_private_key=priv,
+                    vapid_private_key=vv,
                     vapid_claims=claims,
                     timeout=15,
                 )
