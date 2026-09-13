@@ -35,6 +35,33 @@ def _public_point_from_scalar(raw_scalar):
     )
 
 
+def _build_vapid_signer(priv):
+    """Build the VAPID ES256 signer whose public key == the stored public key.
+
+    CRITICAL: py_vapid's Vapid01.from_raw() does NOT interpret its input as a
+    P-256 scalar — passing our raw 32-byte scalar yields a *different* key, so
+    every JWT was signed with the wrong key and FCM replied 403 "VAPID
+    credentials do not correspond to the credentials used to create the
+    subscriptions". Deriving the key via cryptography and loading it as a PEM
+    gives a signer whose public key matches what the browser subscribed to.
+    """
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid01
+
+    raw = _b64u_decode(priv)
+    key = ec.derive_private_key(
+        int.from_bytes(raw, "big"), ec.SECP256R1(), default_backend()
+    )
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return Vapid01.from_pem(pem)
+
+
 def _db():
     from database import SessionLocal
     return SessionLocal()
@@ -127,11 +154,10 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = "", _report
 
         from config import Config
         from pywebpush import webpush, WebPushException
-        from py_vapid import Vapid01
 
         # Rebuild a signer from the raw scalar; pywebpush accepts a Vapid01
         # instance directly and skips its Parser (which rejects PKCS8 PEM).
-        vv = Vapid01.from_raw(_b64u_decode(priv))
+        vv = _build_vapid_signer(priv)
 
         claims = {
             "sub": f"mailto:{Config.YOUR_EMAIL or 'admin@localhost'}",

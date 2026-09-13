@@ -19,18 +19,26 @@ def vapid_public_key():
 
 @router.get("/selfcheck")
 def vapid_selfcheck():
-    """Diagnostic: confirm the pub key we serve actually derives from the priv
-    key we sign with (guards against the 403 'credentials do not correspond'
-    failure caused by a drifted settings pair)."""
-    from services.notify import _vapid_keys, _b64u_decode, _public_point_from_scalar, _b64u_encode
+    """Diagnostic: confirm the key used to SIGN the JWT (derived via the real
+    Vapid01.from_pem path) equals the key the browser subscribes to. Guards
+    against the 403 'credentials do not correspond' failure (was caused by
+    Vapid01.from_raw misinterpreting the scalar and signing with the wrong key)."""
+    from services.notify import _vapid_keys, _build_vapid_signer, _b64u_encode
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
     pub, priv = _vapid_keys()
     if not pub or not priv:
         raise HTTPException(503, "VAPID key not available")
-    derived = _b64u_encode(_public_point_from_scalar(_b64u_decode(priv)))
+    signer = _build_vapid_signer(priv)
+    signer_pub = _b64u_encode(
+        signer.public_key.public_bytes(
+            Encoding.X962, PublicFormat.UncompressedPoint
+        )
+    )
     return {
         "publicKey": pub,
-        "publicKey_derived": derived,
-        "match": pub == derived,
+        "publicKey_sign": signer_pub,
+        "match": pub == signer_pub,
     }
 
 
