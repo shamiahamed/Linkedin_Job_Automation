@@ -143,7 +143,7 @@
                            class="w-full text-sm border border-gray-300 rounded-md pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400">
                     <button onclick="clearSearch()" id="searchClear" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 hidden">✕</button>
                 </div>
-                <select id="expFilter" onchange="loadJobs()" class="text-sm border border-gray-300 rounded-md px-2 py-2 bg-white" title="Experience filter">
+                <select id="expFilter" onchange="expChange()" class="text-sm border border-gray-300 rounded-md px-2 py-2 bg-white" title="Experience filter">
                     <option value="any">Any experience</option>
                     <option value="0-1">0–1 yr</option>
                     <option value="1-3">1–3 yr</option>
@@ -176,6 +176,11 @@
             <div id="jobsLoading" class="card p-10 text-center text-gray-400 text-sm">Loading jobs…</div>
             <div id="jobsGrid" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3"></div>
             <div id="jobsEmpty" class="hidden card p-10 text-center text-gray-400 text-sm"></div>
+            <div id="pager" class="hidden card p-2 flex items-center justify-between text-sm mt-1">
+                <button onclick="pageMove(-1)" id="prevBtn" class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed">‹ Prev</button>
+                <span id="pageInfo" class="text-gray-500 text-xs px-3"></span>
+                <button onclick="pageMove(1)" id="nextBtn" class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed">Next ›</button>
+            </div>
         </section>
     </main>
 
@@ -358,6 +363,9 @@
         let _settings = { auto_apply: true, confirm_before_send: false, reminders_enabled: true,
                           followup_days: 3, purge_handled_days: 5, purge_unapplied_days: 14 };
         let _filters = { status: 'all', exp: 'any', q: '' };
+        let _page = 1;
+        let _perPage = 10;
+        let _total = 0;
         let _confirmJob = null;
         let _resumesCache = [];
         let _selected = new Set();
@@ -450,29 +458,53 @@
             if (!on && !navigator.onLine) showOffline(true);
         }
 
-        function setStatus(s) {
-            _filters.status = s;
-            document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === s));
-            document.querySelectorAll('[data-stat]').forEach(c => c.classList.toggle('opacity-40', c.dataset.stat === s));
-            loadJobs();
-        }
-
-        function clearSearch() {
-            _filters.q = '';
-            document.getElementById('searchBox').value = '';
-            document.getElementById('searchClear').classList.add('hidden');
-            loadJobs();
-        }
-
-        let _deb;
-        function debouncedLoad() {
-            clearTimeout(_deb);
-            _deb = setTimeout(() => {
-                _filters.q = document.getElementById('searchBox').value.trim();
-                document.getElementById('searchClear').classList.toggle('hidden', !_filters.q);
+function setStatus(s) {
+                _filters.status = s;
+                _page = 1;
+                document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === s));
+                document.querySelectorAll('[data-stat]').forEach(c => c.classList.toggle('opacity-40', c.dataset.stat === s));
                 loadJobs();
-            }, 350);
-        }
+            }
+
+            function clearSearch() {
+                _filters.q = '';
+                _page = 1;
+                document.getElementById('searchBox').value = '';
+                document.getElementById('searchClear').classList.add('hidden');
+                loadJobs();
+            }
+
+            function expChange() { _page = 1; loadJobs(); }
+
+            let _deb;
+            function debouncedLoad() {
+                clearTimeout(_deb);
+                _deb = setTimeout(() => {
+                    _filters.q = document.getElementById('searchBox').value.trim();
+                    _page = 1;
+                    document.getElementById('searchClear').classList.toggle('hidden', !_filters.q);
+                    loadJobs();
+                }, 350);
+            }
+
+            function pageMove(delta) {
+                const p = _page + delta;
+                if (p < 1) return;
+                if (delta > 0 && !document.getElementById('nextBtn').disabled === false && p * _perPage - _perPage >= _total) return;
+                _page = p;
+                loadJobs();
+            }
+
+            function updatePager() {
+                const pager = document.getElementById('pager');
+                if (!_total || _total <= _perPage) { pager.classList.add('hidden'); return; }
+                pager.classList.remove('hidden');
+                const start = (_page - 1) * _perPage + 1;
+                const end = Math.min(_page * _perPage, _total);
+                document.getElementById('pageInfo').textContent = `${start}–${end} of ${_total}`;
+                document.getElementById('prevBtn').disabled = _page <= 1;
+                document.getElementById('nextBtn').disabled = _page * _perPage >= _total;
+            }
 
         function contactCell(job) {
             const chips = [];
@@ -554,13 +586,17 @@
             if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
             if (_filters.exp !== 'any') qp += (qp.length > 1 ? '&' : '') + 'exp=' + encodeURIComponent(_filters.exp);
             if (_filters.q) qp += (qp.length > 1 ? '&' : '') + 'q=' + encodeURIComponent(_filters.q);
+            qp += (qp.length > 1 ? '&' : '') + 'page=' + _page + '&per_page=' + _perPage;
             document.getElementById('jobsLoading').classList.remove('hidden');
             document.getElementById('jobsGrid').classList.add('hidden');
             try {
                 const res = await api('/api/jobs' + qp);
-                const jobs = await res.json();
-                await refreshAppsCache();
+                const d = await res.json();
+                const jobs = Array.isArray(d) ? d : d.items;
+                if (!Array.isArray(d)) _total = d.total;
+                await refreshAppsCache(jobs.map(j => j.id));
                 renderJobs(jobs);
+                updatePager();
             } catch (e) {
                 document.getElementById('jobsLoading').classList.add('hidden');
                 const empty = document.getElementById('jobsEmpty');
@@ -791,9 +827,10 @@
             } catch (e) { showToast('Outcome update failed', true); }
         }
 
-        async function refreshAppsCache() {
+        async function refreshAppsCache(jobIds) {
             try {
-                const res = await api('/api/applications');
+                const qs = (jobIds && jobIds.length) ? '?job_ids=' + encodeURIComponent(jobIds.join(',')) : '';
+                const res = await api('/api/applications' + qs);
                 if (res.ok) { _appsCache = await res.json(); }
             } catch (e) {}
         }
@@ -1279,10 +1316,11 @@
             if (!supported) { btn.classList.add('hidden'); return; }
             _notifyState = !!(sub && Notification.permission === 'granted');
             btn.classList.remove('hidden');
-            btn.textContent = _notifyState ? '🔕 Disable notifications' : '🔔 Enable notifications';
-            btn.className = 'text-xs font-medium rounded-lg px-3 py-1.5 ' +
-                (_notifyState ? 'text-gray-700 bg-gray-100 border border-gray-200'
-                              : 'text-blue-700 bg-blue-50 border border-blue-200');
+            btn.textContent = _notifyState ? '🔕' : '🔔';
+            btn.title = _notifyState ? 'Disable notifications' : 'Enable notifications';
+            btn.className = 'text-xs font-medium rounded-full w-8 h-8 flex items-center justify-center ' +
+                (_notifyState ? 'bg-gray-100 border border-gray-200'
+                              : 'bg-blue-50 border border-blue-200');
         }
 
         async function toggleNotifications() {

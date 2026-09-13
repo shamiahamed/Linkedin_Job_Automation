@@ -306,11 +306,13 @@ def list_jobs(
     source: Optional[str] = None,
     q: Optional[str] = None,
     since: Optional[str] = None,
+    page: Optional[int] = None,
+    per_page: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     # Short TTL cache: repeated dashboard reloads skip the DB round-trip
     # (Neon cold-start latency is what makes the UI feel slow).
-    key = (status or "", exp or "", source or "", q or "", since or "")
+    key = (status or "", exp or "", source or "", q or "", since or "", page, per_page)
     hit = _jobs_cache.get("key")
     if hit == key and _time.monotonic() - _jobs_cache["ts"] < 5.0:
         return _jobs_cache["data"]
@@ -354,7 +356,24 @@ def list_jobs(
                     and (hi is None or m <= hi))(
                     _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}"))
             ]
-    return _cache_jobs(key, [j.to_dict() for j in jobs])
+    items = [j.to_dict() for j in jobs]
+    if page is None:
+        # Back-compat: no paging params -> plain array (extension/mobile callers).
+        return _cache_jobs(key, items)
+    per = per_page or 10
+    p = page or 1
+    if per < 1:
+        per = 10
+    if p < 1:
+        p = 1
+    offset = (p - 1) * per
+    return _cache_jobs(key, {
+        "items": items[offset:offset + per],
+        "total": len(items),
+        "page": p,
+        "per_page": per,
+        "has_more": (p * per) < len(items),
+    })
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:

@@ -22,16 +22,36 @@ OUTCOMES = {"interview", "rejected", "offer", "ghosted"}
 
 
 @router.get("/applications")
-def list_applications(job_id: Optional[int] = None, db: Session = Depends(get_db)):
-    apps = db.query(Application).order_by(Application.created_at.desc()).all()
+def list_applications(
+    job_id: Optional[int] = None,
+    job_ids: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Application).order_by(Application.created_at.desc())
+    ids = []
+    if job_ids:
+        try:
+            ids = [int(x) for x in job_ids.split(",") if x.strip().lstrip("-").isdigit()]
+        except ValueError:
+            ids = []
+        if ids:
+            query = query.filter(Application.job_id.in_(ids))
+    apps = query.all()
     if job_id is not None:
         apps = [a for a in apps if a.job_id == job_id]
     followup_days = int(_get_setting(db, "followup_days", "3") or "3")
     now = datetime.utcnow()
+    # Batch-load the referenced jobs in ONE query (no N+1) — this single loop
+    # was 113 round-trips over Neon (~6s) and is now a single IN query.
+    jobs_map = {}
+    needed = {a.job_id for a in apps}
+    if needed:
+        for j in db.query(Job).filter(Job.id.in_(needed)).all():
+            jobs_map[j.id] = j
     result = []
     for app in apps:
         item = app.to_dict()
-        job = db.query(Job).filter(Job.id == app.job_id).first()
+        job = jobs_map.get(app.job_id)
         if job:
             item["job_title"] = job.title
             item["company"] = job.company
