@@ -146,6 +146,7 @@ def _diag():
         from database import SessionLocal, engine
         from models import Application, Job
         from routes.applications import list_applications
+        from sqlalchemy import text
 
         out = {"dialect": engine.dialect.name}
         with engine.connect() as conn:
