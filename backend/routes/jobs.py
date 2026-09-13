@@ -36,6 +36,22 @@ def _cache_jobs(key, items):
     return items
 
 
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """Dashboard summary tiles: total counts per status (GET /api/stats)."""
+    rows = db.query(Job.status, func.count(Job.id)).group_by(Job.status).all()
+    counts = {s: c for s, c in rows if s}
+    total = sum(counts.values())
+    return {
+        "total_jobs": total,
+        "ready_to_send": counts.get("ready_to_send", 0),
+        "applied": counts.get("applied", 0),
+        "pending": counts.get("pending", 0),
+        "phone_summaries_sent": counts.get("phone_summary_sent", 0),
+        "link_emails_sent": counts.get("link_email_sent", 0),
+    }
+
+
 class JobCreate(BaseModel):
     title: str
     company: Optional[str] = None
