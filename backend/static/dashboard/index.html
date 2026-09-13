@@ -1357,7 +1357,17 @@ function setStatus(s) {
             const j = await regRes.json();
             if (!regRes.ok || !j.success) throw new Error((j.detail || 'register failed').replace(/^Error: /, ''));
             await refreshNotifyButton();
-            showToast('Notifications enabled ✓ — job reminders will arrive here');
+            try {
+                const t = await api('/api/push/test', { method: 'POST' });
+                const tj = await t.json();
+                if (!t.ok || !tj.success) {
+                    showToast('Registered, but test send failed (' + (tj.detail || '?') + ')', true);
+                    return;
+                }
+                showToast('Enabled ✓ — ' + tj.registered + ' device(s) registered, test delivered to ' + tj.sent);
+            } catch (e) {
+                showToast('Notifications enabled ✓');
+            }
         }
 
         async function disableNotifications() {
