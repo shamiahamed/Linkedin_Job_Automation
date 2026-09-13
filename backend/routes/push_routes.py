@@ -58,5 +58,5 @@ def send_test_push(db: Session = Depends(get_db)):
     from services.notify import test_push
     from models import PushSubscription
     registered = db.query(PushSubscription).count()
-    sent = test_push()
-    return {"success": sent > 0, "sent": sent, "registered": registered}
+    sent, detail = test_push()
+    return {"success": sent > 0, "sent": sent, "registered": registered, "detail": detail}

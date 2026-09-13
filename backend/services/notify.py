@@ -78,8 +78,10 @@ def _vapid_keys():
         db.close()
 
 
-def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
+def push(title: str, body: str, url: str = "/dashboard", icon: str = "", _report=None):
     """Send a web push to every registered subscription. Best-effort: never raises."""
+    if _report is None:
+        _report = []
     if not title and not body:
         return 0
     db = _db()
@@ -124,11 +126,22 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
                 )
                 sent += 1
             except WebPushException as e:
-                # 404/410 -> subscription dead; drop it. 403 -> the VAPID key used to
-                # subscribe is stale (key rotated in dev), so re-enabling will use the
-                # current key — self-healing instead of failing forever.
+                # 404/410 -> subscription gone; drop it. For anything else we keep
+                # the sub and surface the push service response so failures are
+                # actually visible and diagnosable (e.g. VAPID/audience issues).
                 sc = getattr(e.response, "status_code", None)
-                if sc in (404, 410, 403):
+                body = ""
+                try:
+                    body = (e.response.text or "").strip()[:300]
+                except Exception:
+                    pass
+                if not _report:
+                    _report.append(f"push service HTTP {sc}: {body}")
+                logger.warning(
+                    "webpush failed for sub %s: status=%s body=%s",
+                    s.id, sc, body,
+                )
+                if sc in (404, 410):
                     stale.append(s.id)
             except Exception:
                 pass
@@ -147,8 +160,11 @@ def push(title: str, body: str, url: str = "/dashboard", icon: str = ""):
 
 def test_push():
     """Send a test notification (used by POST /api/push/test)."""
-    return push(
+    report = []
+    sent = push(
         "Job Auto-Apply ✅",
         "Notifications work on this device. You'll get alerts for new jobs, applications and reminders.",
         "/dashboard",
+        _report=report,
     )
+    return sent, (report[0] if report else "")
