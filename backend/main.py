@@ -138,6 +138,21 @@ async def _generic_500(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": detail})
 
 
+@app.get("/api/__diag", include_in_schema=False)
+def _diag(request: Request):
+    """TEMPORARY diagnostic: surface the real error behind /api/applications."""
+    try:
+        tail = ""
+        from pathlib import Path as _P
+        p = _P(__file__).parent / "debug.log"
+        if p.exists():
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+            tail = "\n".join(lines)
+        return {"detail": tail, "env_debug": str(Config.DEBUG), "db": Config.DATABASE_URL.split("@")[-1][:40]}
+    except Exception as e:
+        return {"err": str(e)}
+
+
 @app.get("/health", include_in_schema=False)
 def health():
     """Public readiness probe for Render — deliberately OUTSIDE the API token
