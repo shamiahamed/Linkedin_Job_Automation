@@ -18,6 +18,23 @@ def _b64u_decode(s):
     return base64.urlsafe_b64decode((s + pad).replace("-", "+").replace("_", "/"))
 
 
+def _b64u_encode(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+
+def _public_point_from_scalar(raw_scalar):
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    key = ec.derive_private_key(
+        int.from_bytes(raw_scalar, "big"), ec.SECP256R1(), default_backend()
+    )
+    return key.public_key().public_bytes(
+        Encoding.X962, PublicFormat.UncompressedPoint  # 65 bytes (0x04 || X || Y)
+    )
+
+
 def _db():
     from database import SessionLocal
     return SessionLocal()
@@ -49,8 +66,21 @@ def _vapid_keys():
         priv = _get_setting(db, "vapid_priv", "")
         if pub and priv:
             try:
-                if len(_b64u_decode(priv)) == 32:
-                    return pub, priv
+                raw = _b64u_decode(priv)
+                if len(raw) == 32:
+                    # CRITICAL: only trust the pair if the private scalar actually
+                    # derives to the stored public key. A mismatch means the two
+                    # settings rows drifted apart (e.g. from earlier dev regens),
+                    # and signing with the stale scalar makes the push service
+                    # return HTTP 403 "VAPID credentials do not correspond..."
+                    derived = _b64u_encode(
+                        _public_point_from_scalar(raw)
+                    )
+                    if derived == pub:
+                        return pub, priv
+                    logger.warning(
+                        "VAPID pair mismatch (stored pub != derived pub); regenerating"
+                    )
             except Exception:
                 pass
             # Legacy PEM-encoded key (py_vapid parser can't load PKCS8 ECDSA). Regenerate.

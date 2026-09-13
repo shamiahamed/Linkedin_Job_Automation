@@ -17,6 +17,23 @@ def vapid_public_key():
     return {"publicKey": pub}
 
 
+@router.get("/selfcheck")
+def vapid_selfcheck():
+    """Diagnostic: confirm the pub key we serve actually derives from the priv
+    key we sign with (guards against the 403 'credentials do not correspond'
+    failure caused by a drifted settings pair)."""
+    from services.notify import _vapid_keys, _b64u_decode, _public_point_from_scalar, _b64u_encode
+    pub, priv = _vapid_keys()
+    if not pub or not priv:
+        raise HTTPException(503, "VAPID key not available")
+    derived = _b64u_encode(_public_point_from_scalar(_b64u_decode(priv)))
+    return {
+        "publicKey": pub,
+        "publicKey_derived": derived,
+        "match": pub == derived,
+    }
+
+
 @router.post("/register")
 def register_subscription(payload: dict = Body(default=None), db: Session = Depends(get_db)):
     """Save a service-worker push subscription (from navigator.pushManager.subscribe)."""
