@@ -31,9 +31,21 @@ class JobParser:
 
     @staticmethod
     def extract_experience(text: str) -> str:
-        pattern = r"(\d+(?:\s*-\s*\d+)?\s*\+?\s*(?:years?|yrs?))"
+        # Fresher/entry-level markers first — "0-1 years" and explicit fresher
+        # wording both count as Fresher so cards show it clearly.
+        low = (text or "").lower()
+        fresher = r"\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b"
+        if re.search(fresher, low):
+            return "Fresher"
+        pattern = r"(\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?\s*\+?\s*(?:years?|yrs?))"
         match = re.search(pattern, text, re.IGNORECASE)
-        return match.group(1).strip() if match else ""
+        if not match:
+            return ""
+        val = re.sub(r"\s+", " ", match.group(1)).strip()
+        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", val)]
+        if nums and max(nums) <= 1:
+            return "Fresher"
+        return val
 
     @staticmethod
     def extract_salary(text: str) -> str:

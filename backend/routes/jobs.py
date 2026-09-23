@@ -13,6 +13,7 @@ import time as _time
 from database import get_db
 from models import Job, Application, Setting, Resume
 from services.email_builder import EmailBuilder
+from services.job_search import is_senior_role, experience_label
 
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -1128,11 +1129,16 @@ def purge_old_jobs(db: Session) -> int:
     for j in stale:
         try:
             dead = False
+            text = f"{j.title or ''} {_feed_body(j.description or '')}"
             # 1) Too senior: role asks for MORE experience than the user can attend
             #    (lower bound > 1 yr — so 2+, 3-5 etc are removed; fresher/0-1/1/1-2
             #    stay because a 1-yr candidate can attend).
-            min_months = _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}")
+            min_months = _exp_min_months(f"{j.experience or ''} {text}")
             if min_months is not None and min_months > 12:
+                dead = True
+            # 1b) Senior/leadership title (Senior X, Principal, Staff, Manager…)
+            #     — Adzuna descriptions rarely state years, so the title decides.
+            elif is_senior_role(j.title or "", _feed_body(j.description or "")):
                 dead = True
             # 2) Out-of-region location (Pune/Mumbai/etc).
             elif any(b in (j.location or "").lower() for b in outside):
@@ -1142,6 +1148,13 @@ def purge_old_jobs(db: Session) -> int:
                 dead = True
             if dead:
                 _delete(j)
+            elif not (j.experience or "").strip():
+                # Backfill experience parsed from title/description for old
+                # auto-fetch rows stored before experience parsing existed.
+                parsed = experience_label(j.title or "", _feed_body(j.description or ""))
+                if parsed:
+                    j.experience = parsed
+                    count += 1
         except Exception as e:  # noqa: BLE001
             # Never let one bad row abort the whole housekeeping pass.
             print(f"[purge-skip] job {j.id}: {e!r}")

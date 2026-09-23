@@ -17,6 +17,7 @@ import html
 import logging
 import requests
 from config import Config
+from services.job_parser import JobParser
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -73,6 +74,57 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(str(text))).strip()
 
 
+# Senior/leadership titles are not fresher-suitable — a 1-yr candidate can't
+# attend them, and Adzuna descriptions rarely state the years explicitly, so
+# we key on the TITLE itself. Roles that ALSO mention fresher/entry/intern in
+# their text are kept (rare but safe).
+_SENIOR_TITLE_RE = re.compile(
+    r"\b(senior|principal|staff|lead(?:ership|ing)?|manager|director|architect|"
+    r"vp\b|vice\s+president|head(?:\s+of)?|sr\.?)\b",
+    re.IGNORECASE,
+)
+# Fresher words OK in a TITLE ("Fresher Software Engineer", "Junior Developer",
+# "Intern", "Graduate Trainee") — these override a senior title keyword.
+_TITLE_FRESHER_RE = re.compile(
+    r"\b(freshers?|entry[-\s]level|intern|trainee|junior|graduate|passouts?|"
+    r"0\s*[-–]\s*1\s*(?:years?|yrs?)?)\b",
+    re.IGNORECASE,
+)
+# Explicit "open to freshers" phrasing in a DESCRIPTION. Deliberately does NOT
+# include junior/intern/trainee — "mentor junior team members" describes the
+# SENIOR role, not a fresher opening.
+_DESC_FRESHER_RE = re.compile(
+    r"\b(freshers?\s*(?:are|welcome|can|eligible)?|entry[-\s]level\s+(?:role|position|opportunity|opening)|"
+    r"0\s*[-–]\s*1\s*(?:years?|yrs?)|0\s+experience|no\s+experience|recent\s+graduates?|"
+    r"graduate\s+trainee|passouts?)\b",
+    re.IGNORECASE,
+)
+
+
+def is_senior_role(title: str, description: str = "") -> bool:
+    """True when the TITLE says the role is senior/leadership and nothing else
+    clearly opens it to freshers (title carries 'fresher/junior/intern' OR the
+    description explicitly welcomes freshers)."""
+    t = title or ""
+    if not _SENIOR_TITLE_RE.search(t):
+        return False
+    if _TITLE_FRESHER_RE.search(t):
+        return False
+    return not _DESC_FRESHER_RE.search(t + "\n" + (description or ""))
+
+
+def experience_label(title: str, description: str = "") -> str:
+    """Friendly experience label for an auto-fetch job: 'Fresher' when the
+    posting signals entry-level (title freshness OR explicit fresher phrasing
+    OR a 0-1 year range), else the parsed '1-2 years' style text, else ''."""
+    if _TITLE_FRESHER_RE.search(title or ""):
+        return "Fresher"
+    text = f"{title or ''} {description or ''}"
+    if _DESC_FRESHER_RE.search(text):
+        return "Fresher"
+    return JobParser.extract_experience(text)
+
+
 def adzuna_configured() -> bool:
     return bool(Config.ADZUNA_APP_ID and Config.ADZUNA_APP_KEY)
 
@@ -127,7 +179,10 @@ def to_job_dict(result: dict, city: str) -> dict:
         "description": desc,
         "emails": [],
         "phones": [],
-        "experience": "",
+        # Parse the experience out of the Adzuna description so cards show
+        # Fresher / 1-2 years instead of a blank; senior/leadership titles
+        # (Senior/Principal/Staff/Manager…) are skipped during fetch.
+        "experience": experience_label(title, desc),
         "salary": _salary_text(result),
         "source": "auto_fetch",
         # The redirect URL is the apply action — set as apply_link so the job
@@ -165,6 +220,10 @@ def fetch_daily_jobs(keywords=None, cities=None, limit: int = 200, max_seconds: 
             for result in search_keyword_city(kw, city):
                 j = to_job_dict(result, city)
                 if not j["title"]:
+                    continue
+                # Senior/leadership titles (Senior X, Principal, Staff, Manager,
+                # Director…) aren't fresher-suitable — skip them entirely.
+                if is_senior_role(j["title"], j["description"]):
                     continue
                 key = (j["title"].lower(), j["url"], j["company"].lower())
                 if key in seen:

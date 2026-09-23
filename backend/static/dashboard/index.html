@@ -641,13 +641,20 @@ function setStatus(s) {
         function compactExp(job) {
             const raw = String(job.experience || '');
             if (/^fresher/i.test(raw)) return 'Fresher';
+            // "1+ years"/"1-3 years"/"1.5-3" → show the lower bound clearly.
             if (raw.trim()) {
-                const m = raw.match(/(\d+(?:\.\d+)?)/);
-                if (m) { if (m[1] === '0' || /\b0\s*[-–—to]\s*1\b/i.test(raw)) return 'Fresher'; return m[1]; }
+                const m = raw.match(/^(\d+(?:\.\d+)?)(?:\s*[-–—+]\s*\d+(?:\.\d+)?)?\s*(?:years?|yrs?)/i);
+                if (m) {
+                    const low = parseFloat(m[1]);
+                    if (low <= 0 || /\b0\s*[-–—to]\s*1\b/i.test(raw)) return 'Fresher';
+                    return (Number.isInteger(low) ? low : low.toFixed(1)) + '+ yrs';
+                }
+                if (/\bfresher/i.test(raw)) return 'Fresher';
+                return raw.trim();
             }
             const t = ' ' + String(job.description || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
             if (/\b(freshers?|entry[- ]?level|0 experience|no experience|recent graduates?|graduate trainee|passouts?)\b/.test(t)) return 'Fresher';
-            return raw.trim() || '·';
+            return raw.trim() || 'Exp?';
         }
 
         function timeAgo(iso) {
