@@ -340,11 +340,14 @@ def list_jobs(
         return _jobs_cache["data"]
     try:
         cleanup_no_contact(db)
+    except Exception as e:  # noqa: BLE001
+        print(f"[housekeeping-skip] cleanup_no_contact: {e!r}")
+    try:
         purge_old_jobs(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
         # A dropped DB connection here must never 500 the dashboard list;
         # the periodic loop retries housekeeping anyway.
-        pass
+        print(f"[housekeeping-skip] purge_old_jobs: {e!r}")
     query = db.query(Job).order_by(func.coalesce(Job.updated_at, Job.created_at).desc())
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
@@ -1123,21 +1126,25 @@ def purge_old_jobs(db: Session) -> int:
     # --- Auto-fetch stale rows (self-heal leftover/old fetches) ---
     stale = db.query(Job).filter(Job.source == "auto_fetch", _not_saved()).all()
     for j in stale:
-        dead = False
-        # 1) Too senior: role asks for MORE experience than the user can attend
-        #    (lower bound > 1 yr — so 2+, 3-5 etc are removed; fresher/0-1/1/1-2
-        #    stay because a 1-yr candidate can attend).
-        min_months = _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}")
-        if min_months is not None and min_months > 12:
-            dead = True
-        # 2) Out-of-region location (Pune/Mumbai/etc).
-        elif any(b in (j.location or "").lower() for b in outside):
-            dead = True
-        # 3) Older than the 2-day fetch retention.
-        elif j.created_at and j.created_at < datetime.utcnow() - timedelta(days=fetch_days):
-            dead = True
-        if dead:
-            _delete(j)
+        try:
+            dead = False
+            # 1) Too senior: role asks for MORE experience than the user can attend
+            #    (lower bound > 1 yr — so 2+, 3-5 etc are removed; fresher/0-1/1/1-2
+            #    stay because a 1-yr candidate can attend).
+            min_months = _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}")
+            if min_months is not None and min_months > 12:
+                dead = True
+            # 2) Out-of-region location (Pune/Mumbai/etc).
+            elif any(b in (j.location or "").lower() for b in outside):
+                dead = True
+            # 3) Older than the 2-day fetch retention.
+            elif j.created_at and j.created_at < datetime.utcnow() - timedelta(days=fetch_days):
+                dead = True
+            if dead:
+                _delete(j)
+        except Exception as e:  # noqa: BLE001
+            # Never let one bad row abort the whole housekeeping pass.
+            print(f"[purge-skip] job {j.id}: {e!r}")
 
     def _purge(days: int, statuses: list):
         cutoff = datetime.utcnow() - timedelta(days=days)
