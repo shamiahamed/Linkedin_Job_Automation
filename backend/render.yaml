@@ -34,3 +34,7 @@ services:
         sync: false
       - key: DEBUG
         value: "false"
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false

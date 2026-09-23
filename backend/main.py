@@ -255,11 +255,13 @@ def root():
 @app.on_event("startup")
 async def _startup():
     """Create tables with retry (Neon wakes from zero on first connect), then run
-    the periodic cleanup + daily-reminder loop."""
+    the periodic cleanup + daily-reminder + auto-fetch loop."""
     _ensure_tables(retries=3, wait=3.0)
-    from routes.jobs import cleanup_no_contact, purge_old_jobs
+    from routes.jobs import cleanup_no_contact, purge_old_jobs, fetch_jobs_now, _get_setting
     from services.reminders import reminders_due, run_daily_reminders, mark_reminders_done
     from database import SessionLocal
+    from datetime import datetime as _dt
+    from config import Config
 
     async def _loop():
         while True:
@@ -271,6 +273,23 @@ async def _startup():
                     if reminders_due(db):
                         run_daily_reminders(db)
                         mark_reminders_done(db)
+                    # Daily auto-fetch: once per day (UTC)
+                    try:
+                        if _get_setting(db, "auto_fetch", "0") in ("1", "true", "yes"):
+                            last = _get_setting(db, "last_fetch_at", "")
+                            now = _dt.utcnow().date()
+                            if not last:
+                                do = True
+                            else:
+                                try:
+                                    last_date = _dt.fromisoformat(last.split("T")[0]).date()
+                                except Exception:
+                                    last_date = None
+                                do = (last_date != now)
+                            if do:
+                                fetch_jobs_now(db)
+                    except Exception:
+                        pass
                 finally:
                     db.close()
             except Exception:

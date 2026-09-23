@@ -56,6 +56,11 @@ class Config:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
+    # Adzuna India jobs API (free; used by the daily auto-fetch. off when keys missing)
+    ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
+    ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
+    ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "in")
+
     # Applicant Details
     YOUR_NAME = os.getenv("YOUR_NAME", "Shamim Ahamed J")
     YOUR_PHONE = os.getenv("YOUR_PHONE", "9894593190")

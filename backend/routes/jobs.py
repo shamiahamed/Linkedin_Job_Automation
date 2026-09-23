@@ -141,8 +141,10 @@ def _notify_sent(job, to_email: str = "") -> None:
         pass
 
 
-@router.post("/jobs")
-def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
+def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False):
+    """Shared capture pipeline used by the API route AND the daily auto-fetch.
+    Everything the old create_job route did: LLM refine weak captures, dedupe,
+    create the Job row, set status, auto-apply, and notify the dashboard."""
     _invalidate_jobs_cache()
     with _CREATE_LOCK:
         # Optional Groq refinement for weak captures (generic title, or a post with
@@ -151,7 +153,8 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
         if job_data.description:
             weak_title = _title_weak(job_data.title)
             weak_contact = not job_data.emails and not job_data.phones and not (job_data.apply_link or "")
-            if weak_title or weak_contact:
+            # Auto-fetched listings (Adzuna) are already structured — skip LLM refinement.
+            if (weak_title or weak_contact) and job_data.source != "auto_fetch":
                 try:
                     from services import llm as _llm
 
@@ -235,18 +238,25 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
         db.refresh(job)
 
         # Notify the dashboard (mobile/desktop) that a new job was captured.
-        try:
-            from services.notify import push as _push
+        # Auto-fetched jobs are batched into ONE summary push by fetch_jobs_now.
+        if not silent_push:
+            try:
+                from services.notify import push as _push
 
-            _push(
-                "New job captured 🔔",
-                f"{job.title} at {job.company or 'unknown'}"
-                + (f" — {job.status.replace('_', ' ')}" if job.status != 'pending' else ""),
-                "/dashboard",
-            )
-        except Exception:
-            pass
+                _push(
+                    "New job captured 🔔",
+                    f"{job.title} at {job.company or 'unknown'}"
+                    + (f" — {job.status.replace('_', ' ')}" if job.status != 'pending' else ""),
+                    "/dashboard",
+                )
+            except Exception:
+                pass
         return job.to_dict()
+
+
+@router.post("/jobs")
+def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
+    return ingest_job(db, job_data)
 
 
 class TextCapture(BaseModel):
@@ -595,6 +605,7 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
 
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
+    from services import job_search as _js
     return {
         "auto_apply": _get_setting(db, "auto_apply", "1") == "1",
         "confirm_before_send": _get_setting(db, "confirm_before_send", "0") in ("1", "true", "yes"),
@@ -602,6 +613,14 @@ def get_settings(db: Session = Depends(get_db)):
         "followup_days": int(_get_setting(db, "followup_days", "3") or "3"),
         "purge_handled_days": int(_get_setting(db, "purge_handled_days", "5") or "5"),
         "purge_unapplied_days": int(_get_setting(db, "purge_unapplied_days", "14") or "14"),
+        # Daily job auto-fetch
+        "auto_fetch": _get_setting(db, "auto_fetch", "0") in ("1", "true", "yes"),
+        "fetch_keywords": _get_setting(db, "fetch_keywords", ",".join(_js.DEFAULT_KEYWORDS)),
+        "fetch_cities": _get_setting(db, "fetch_cities", ",".join(_js.DEFAULT_CITIES)),
+        "fetch_max_results": int(_get_setting(db, "fetch_max_results", "200") or "200"),
+        "adzuna_configured": _js.adzuna_configured(),
+        "last_fetch_at": _get_setting(db, "last_fetch_at", ""),
+        "last_fetch_summary": _get_setting(db, "last_fetch_summary", ""),
     }
 
 
@@ -619,8 +638,75 @@ def update_settings(payload: dict, db: Session = Depends(get_db)):
             except (TypeError, ValueError):
                 val = 3 if key == "followup_days" else (5 if key == "purge_handled_days" else 14)
             _set_setting(db, key, str(val))
+    # Daily job auto-fetch settings
+    if payload.get("auto_fetch") is not None:
+        _set_setting(db, "auto_fetch", "1" if payload.get("auto_fetch") else "0")
+    if payload.get("fetch_keywords") is not None:
+        _set_setting(db, "fetch_keywords", str(payload.get("fetch_keywords")).strip())
+    if payload.get("fetch_cities") is not None:
+        _set_setting(db, "fetch_cities", str(payload.get("fetch_cities")).strip())
+    if payload.get("fetch_max_results") is not None:
+        try:
+            _set_setting(db, "fetch_max_results", str(max(10, min(200, int(payload.get("fetch_max_results"))))))
+        except (TypeError, ValueError):
+            pass
     db.commit()
     return get_settings(db)
+
+
+def _split_csv(value: str) -> list:
+    return [x.strip() for x in (value or "").split(",") if x.strip()]
+
+
+def fetch_jobs_now(db: Session) -> dict:
+    """Manual/triggered fetch: pull today's Adzuna India listings (keywords x
+    cities) and ingest each through the shared pipeline (dedupe + auto-apply).
+    Lands them as cards when auto_apply is off, or auto-fires when on."""
+    from services import job_search as _js
+    from datetime import datetime as _dt
+
+    if not _js.adzuna_configured():
+        return {"success": False, "fetched": 0, "added": 0,
+                "detail": "Adzuna keys not set — add ADZUNA_APP_ID / ADZUNA_APP_KEY (free) in env"}
+    keywords = _split_csv(_get_setting(db, "fetch_keywords", "")) or _js.DEFAULT_KEYWORDS
+    cities = _split_csv(_get_setting(db, "fetch_cities", "")) or _js.DEFAULT_CITIES
+    try:
+        limit = max(10, min(200, int(_get_setting(db, "fetch_max_results", "100") or "100")))
+    except Exception:
+        limit = 100
+    results = _js.fetch_daily_jobs(keywords, cities, limit=limit, max_seconds=45)
+    before = db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0
+    for item in results:
+        try:
+            if not item.get("url"):
+                continue
+            ingest_job(db, JobCreate(**item), silent_push=True)
+        except Exception:
+            continue
+    added = (db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0) - before
+    summary = f"Fetched {len(results)} jobs, {added} new"
+    _set_setting(db, "last_fetch_at", _dt.utcnow().isoformat(timespec="seconds"))
+    _set_setting(db, "last_fetch_summary", summary)
+    db.commit()
+    _invalidate_jobs_cache()
+    if added > 0:
+        try:
+            from services.notify import push as _push
+
+            _push(
+                "Auto-fetch complete 📥",
+                f"{added} new jobs landed (review cards → apply/confirm).",
+                "/dashboard",
+            )
+        except Exception:
+            pass
+    return {"success": True, "fetched": len(results), "added": added, "detail": summary}
+
+
+@router.post("/jobs/fetch-now")
+def jobs_fetch_now(db: Session = Depends(get_db)):
+    """Manual trigger: fetch new jobs immediately (same pipeline as the daily run)."""
+    return fetch_jobs_now(db)
 
 
 @router.post("/jobs/bulk/delete")

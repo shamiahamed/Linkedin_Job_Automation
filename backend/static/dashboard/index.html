@@ -334,6 +334,34 @@
                     </div>
                 </div>
                 <button onclick="saveRetentionSettings()" class="w-full bg-gray-800 hover:bg-gray-900 text-white rounded-md py-2 text-sm font-medium">Save retention settings</button>
+                <!-- Daily job auto-fetch -->
+                <div class="border-t border-gray-100 pt-4 space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="font-medium text-gray-800">Auto-fetch jobs daily</p>
+                            <p class="text-xs text-gray-500">Once per day — lands as cards (you verify and fire). No auto-email unless Auto-apply is ON.</p>
+                        </div>
+                        <button onclick="toggleSetting('auto_fetch')" id="sw_auto_fetch" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
+                            <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+                        </button>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-600 block mb-1">Keywords (comma-separated) — IT + all roles</label>
+                        <textarea id="st_fetch_keywords" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-600 block mb-1">Cities (comma-separated) — metros + all TN cities</label>
+                        <textarea id="st_fetch_cities" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1">
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Max results/day</label>
+                            <input id="st_fetch_max_results" type="number" min="10" max="500" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                        </div>
+                        <button onclick="doFetchNow()" class="mt-5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap">Fetch now</button>
+                    </div>
+                    <div id="fetchStatus" class="text-[11px] text-gray-500"></div>
+                </div>
                 <div class="border-t border-gray-100 pt-4">
                     <p class="font-medium text-gray-800 mb-1">Profile</p>
                     <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
@@ -361,7 +389,8 @@
     <script>
         const API = location.origin;
         let _settings = { auto_apply: true, confirm_before_send: false, reminders_enabled: true,
-                          followup_days: 3, purge_handled_days: 5, purge_unapplied_days: 14 };
+                          followup_days: 3, purge_handled_days: 5, purge_unapplied_days: 14,
+                          auto_fetch: false, fetch_keywords: '', fetch_cities: '', fetch_max_results: 200 };
         let _filters = { status: 'all', exp: 'any', q: '' };
         let _page = 1;
         let _perPage = 10;
@@ -1063,9 +1092,18 @@ function setStatus(s) {
                 setSwitch('sw_auto_apply', !!s.auto_apply);
                 setSwitch('sw_confirm_before_send', !!s.confirm_before_send);
                 setSwitch('sw_reminders_enabled', !!s.reminders_enabled);
+                setSwitch('sw_auto_fetch', !!s.auto_fetch);
                 document.getElementById('st_followup_days').value = s.followup_days;
                 document.getElementById('st_purge_handled').value = s.purge_handled_days;
                 document.getElementById('st_purge_unapplied').value = s.purge_unapplied_days;
+                document.getElementById('st_fetch_keywords').value = s.fetch_keywords || '';
+                document.getElementById('st_fetch_cities').value = s.fetch_cities || '';
+                document.getElementById('st_fetch_max_results').value = s.fetch_max_results || 200;
+                const fs = document.getElementById('fetchStatus');
+                fs.textContent = s.adzuna_configured
+                    ? ('Source: Adzuna India ✓ — last fetch: ' + (s.last_fetch_at || 'never')
+                       + (s.last_fetch_summary ? ' (' + s.last_fetch_summary + ')' : ''))
+                    : 'Source not configured — set ADZUNA_APP_ID / ADZUNA_APP_KEY in backend .env (free signup)';
             } catch (e) { /* backend offline */ }
         }
 
@@ -1073,7 +1111,10 @@ function setStatus(s) {
             const body = {
                 followup_days: Number(document.getElementById('st_followup_days').value) || 3,
                 purge_handled_days: Number(document.getElementById('st_purge_handled').value) || 5,
-                purge_unapplied_days: Number(document.getElementById('st_purge_unapplied').value) || 14
+                purge_unapplied_days: Number(document.getElementById('st_purge_unapplied').value) || 14,
+                fetch_keywords: document.getElementById('st_fetch_keywords').value,
+                fetch_cities: document.getElementById('st_fetch_cities').value,
+                fetch_max_results: Number(document.getElementById('st_fetch_max_results').value) || 200
             };
             try {
                 await api('/api/settings', {
@@ -1082,6 +1123,19 @@ function setStatus(s) {
                 showToast('Settings saved');
                 loadSettings();
             } catch (e) { showToast('Could not save settings', true); }
+        }
+
+        async function doFetchNow() {
+            try {
+                showToast('Fetching jobs…');
+                const r = await (await api('/api/jobs/fetch-now', { method: 'POST' })).json();
+                if (r.success) {
+                    showToast('Fetched ' + r.fetched + ' jobs, ' + r.added + ' new');
+                    loadSettings(); fetchStats(); loadJobs();
+                } else {
+                    showToast(r.detail || 'Fetch failed', true);
+                }
+            } catch (e) { showToast('Fetch failed', true); }
         }
 
         async function toggleSetting(key) {
@@ -1096,6 +1150,8 @@ function setStatus(s) {
                 });
                 showToast(key === 'auto_apply'
                     ? (next ? 'Auto-apply ON — new email jobs get applied instantly.' : 'Auto-apply OFF.')
+                    : key === 'auto_fetch'
+                    ? (next ? 'Auto-fetch ON — new jobs land as cards once a day.' : 'Auto-fetch OFF.')
                     : (next ? 'Confirm mode ON — email jobs are staged for approval.' : 'Confirm mode OFF.'));
             } catch (e) { showToast('Could not save setting', true); }
         }
