@@ -327,13 +327,14 @@ def list_jobs(
     q: Optional[str] = None,
     since: Optional[str] = None,
     saved: Optional[bool] = None,
+    detected: Optional[bool] = None,
     page: Optional[int] = None,
     per_page: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     # Short TTL cache: repeated dashboard reloads skip the DB round-trip
     # (Neon cold-start latency is what makes the UI feel slow).
-    key = (status or "", exp or "", source or "", q or "", since or "", saved, page, per_page)
+    key = (status or "", exp or "", source or "", q or "", since or "", saved, detected, page, per_page)
     hit = _jobs_cache.get("key")
     if hit == key and _time.monotonic() - _jobs_cache["ts"] < 5.0:
         return _jobs_cache["data"]
@@ -351,6 +352,10 @@ def list_jobs(
             query = query.filter(Job.status.in_(statuses))
     if source:
         query = query.filter(Job.source == source)
+    if detected:
+        # "Detected"/All view: LinkedIn + mobile captures ONLY (auto-fetch lives
+        # under its own Recent view, never mixed into the general list).
+        query = query.filter(or_(Job.source.is_(None), Job.source != "auto_fetch"))
     if saved:
         query = query.filter(or_(Job.saved.is_(True), Job.saved == True))  # noqa: E712
     elif saved is False:
@@ -1083,9 +1088,12 @@ def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
 
 def purge_old_jobs(db: Session) -> int:
     """Retention rules:
-    - auto-fetch jobs (source=="auto_fetch") auto-delete after
-      `fetch_retention_days` (default 2) — recent-jobs only, like LinkedIn
-      detection. ⭐ saved jobs are kept.
+    - auto-fetch jobs (source=="auto_fetch"):
+        * auto-delete after `fetch_retention_days` (default 2)
+        * auto-delete if location is OUTSIDE the user's region (north India was
+          removed — Pune/Mumbai/Delhi etc stale rows self-clean)
+        * auto-delete if the role asks for MORE experience than the user's rule
+          (>1 yr lower bound, i.e. senior/2+ roles the user can't attend)
     - handled jobs (applied / phone_summary_sent / link_email_sent) auto-delete
       after `purge_handled_days` (default 5) — they're done.
     - unapplied jobs (pending / ready_to_send / duplicate / apply_link) auto-delete
@@ -1100,33 +1108,49 @@ def purge_old_jobs(db: Session) -> int:
 
     def _delete(j):
         nonlocal count
-        for _ in [j]:
-            db.query(Application).filter(Application.job_id == j.id).delete()
-            db.delete(j)
-            count += 1
+        db.query(Application).filter(Application.job_id == j.id).delete()
+        db.delete(j)
+        count += 1
+
+    # Only this user's south-India region (north cities were removed from the list).
+    # Hyderabad and Kochi etc ARE wanted (south) — they are NOT in this list.
+    outside = ["pune", "maharashtra", "mumbai", "delhi", "kolkata", "ahmedabad",
+               "gurugram", "gurgaon", "noida", "jaipur", "thane"]
+
+    def _not_saved():
+        return or_(Job.saved.is_(None), Job.saved == False)  # noqa: E712
+
+    # --- Auto-fetch stale rows (self-heal leftover/old fetches) ---
+    stale = db.query(Job).filter(Job.source == "auto_fetch", _not_saved()).all()
+    for j in stale:
+        dead = False
+        # 1) Too senior: role asks for MORE experience than the user can attend
+        #    (lower bound > 1 yr — so 2+, 3-5 etc are removed; fresher/0-1/1/1-2
+        #    stay because a 1-yr candidate can attend).
+        min_months = _exp_min_months(f"{j.experience or ''} {_feed_body(j.description or '')}")
+        if min_months is not None and min_months > 12:
+            dead = True
+        # 2) Out-of-region location (Pune/Mumbai/etc).
+        elif any(b in (j.location or "").lower() for b in outside):
+            dead = True
+        # 3) Older than the 2-day fetch retention.
+        elif j.created_at and j.created_at < datetime.utcnow() - timedelta(days=fetch_days):
+            dead = True
+        if dead:
+            _delete(j)
 
     def _purge(days: int, statuses: list):
         cutoff = datetime.utcnow() - timedelta(days=days)
         rows = db.query(Job).filter(
             Job.status.in_(statuses),
             Job.created_at < cutoff,
-            or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
+            _not_saved(),
         ).all()
         for j in rows:
             _delete(j)
 
-    # Auto-fetch recent-jobs retention (default 2 days), saved kept.
-    fetch_cutoff = datetime.utcnow() - timedelta(days=fetch_days)
-    fetched_rows = db.query(Job).filter(
-        Job.source == "auto_fetch",
-        Job.created_at < fetch_cutoff,
-        or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
-    ).all()
-    for j in fetched_rows:
-        _delete(j)
-
     _purge(handled_days, ["applied", "phone_summary_sent", "link_email_sent"])
     _purge(unapplied_days, ["pending", "ready_to_send", "duplicate", "apply_link"])
-    if count:
+    if count or len(stale):
         db.commit()
     return count

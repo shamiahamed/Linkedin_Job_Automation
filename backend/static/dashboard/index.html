@@ -675,8 +675,12 @@ function setStatus(s) {
 
         async function loadJobs() {
             let qp = '?';
-            if (_filters.recent) qp += 'source=auto_fetch';
-            else if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
+            if (_filters.recent) {
+                qp += 'source=auto_fetch';
+            } else {
+                if (!_filters.savedOnly) qp += 'detected=true';
+                if (_filters.status !== 'all') qp += (qp.length > 1 ? '&' : '') + 'status=' + encodeURIComponent(_filters.status);
+            }
             if (_filters.savedOnly) qp += (qp.length > 1 ? '&' : '') + 'saved=true';
             if (_filters.exp !== 'any') qp += (qp.length > 1 ? '&' : '') + 'exp=' + encodeURIComponent(_filters.exp);
             if (_filters.q) qp += (qp.length > 1 ? '&' : '') + 'q=' + encodeURIComponent(_filters.q);
