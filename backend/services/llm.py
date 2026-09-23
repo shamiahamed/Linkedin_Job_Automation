@@ -206,14 +206,21 @@ def draft_email(job, additional_message: str = "") -> str:
         f"- First line MUST be: Dear HR,\n"
         f"- Then 2–3 short paragraphs, each separated by a blank line.\n"
         f"- Present the applicant as {level}; never claim more than one year of experience.\n"
-        f"- Applicant: Shamim Ahamed J. Background areas (PICK ONLY the ones relevant to "
-        f"THIS role — do not list unrelated skills): Python/FastAPI/Django backends, data "
-        f"analytics (Power BI, SQL), manual+automated QA (Selenium, pytest), IT network "
-        f"support. For a customer-support role write about communication, diagnosing and "
-        f"resolving issues, and helping users — keep any technical mention brief.\n"
-        f"- Do NOT add any GitHub/projects links, availability phrases like 'available at "
-        f"your convenience', or filler like 'I hope this email finds you well' or "
-        f"'I came across this opportunity'.\n"
+        f"- Applicant: Shamim Ahamed J. Mention skills ONLY from the applicant's background "
+        f"that are DIRECTLY asked for in this role's title or requirements. Pick AT MOST "
+        f"ONE or TWO skill areas, and ONLY if actually related to THIS role. NEVER list "
+        f"multiple background areas together. If the role does not match any of 'backend "
+        f"(Python/FastAPI/Django, PostgreSQL, Docker)', 'data analytics (Power BI, SQL)', "
+        f"'QA/testing (Selenium, pytest)', or 'IT network/support', write a short simple "
+        f"paragraph about being detail-oriented, willing to learn, and ready to contribute "
+        f"— do not invent the applicant's skills.\n"
+        f"- For a customer-support/support role, write ONLY about communication, diagnosing "
+        f"and resolving issues, and helping users; keep any technical mention brief or omit it.\n"
+        f"- Keep the language SIMPLE and directly about '{title}' — no generic filler.\n"
+        f"- By DEFAULT do not add any GitHub/project links. The ONLY exception: if the "
+        f"applicant's note explicitly asks to include GitHub/projects, then include them.\n"
+        f"- Do NOT include availability phrases like 'available at your convenience', "
+        f"or filler like 'I hope this email finds you well' or 'I came across this opportunity'.\n"
         f"- End with the sentence: Thank you for considering my application.\n"
         f"- Do NOT include a sign-off or signature (the sender's name/phone/email are added "
         f"by the system afterwards).\n"
@@ -223,8 +230,12 @@ def draft_email(job, additional_message: str = "") -> str:
         text = _chat([{"role": "user", "content": prompt}], max_tokens=700)
         text = (text or "").strip()
         text = re.sub(r"^\"|\"$", "", text)
-        _draft_cache[key] = text or None
-        return _draft_cache[key]
+        # Only cache successful generations; a transient Groq failure (None)
+        # must NOT poison this job+guidance combo for the rest of the process.
+        if text:
+            _draft_cache[key] = text
+            return text
+        return None
     except Exception:
         return None
 
@@ -255,8 +266,10 @@ def draft_subject(job, additional_message: str = "") -> str:
     try:
         text = _chat([{"role": "user", "content": prompt}], max_tokens=256)
         text = (text or "").strip().strip('"')
-        _subject_cache[key] = text or None
-        return _subject_cache[key]
+        if text:
+            _subject_cache[key] = text
+            return text
+        return None
     except Exception:
         return None
 
@@ -293,7 +306,9 @@ def draft_followup(job, applied_date: str = "", extra: str = "") -> str:
         text = _chat([{"role": "user", "content": prompt}], max_tokens=400)
         text = (text or "").strip()
         text = re.sub(r"^\"|\"$", "", text)
-        _followup_cache[key] = text or None
-        return _followup_cache[key]
+        if text:
+            _followup_cache[key] = text
+            return text
+        return None
     except Exception:
         return None

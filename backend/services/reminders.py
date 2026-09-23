@@ -133,7 +133,11 @@ def run_daily_reminders(db):
 
 
 def reminders_due(db) -> bool:
-    """True if today's partial + final reminders haven't fired at the configured local hour."""
+    """True if today's reminders haven't fired yet and the daily schedule time
+    has arrived. Uses 'on/after the scheduled local time' so the 9 AM reminder
+    still fires even if the hourly loop tick misses the exact 9:00–9:59 window
+    (e.g. server started at 10:30 — it now fires on the first tick after 9 AM
+    instead of never)."""
     from routes.jobs import _get_setting
 
     if _get_setting(db, "reminders_enabled", "1") not in ("1", "true", "yes"):
@@ -146,16 +150,16 @@ def reminders_due(db) -> bool:
     from datetime import timezone, timedelta as _td
 
     now = datetime.now(timezone(_td(hours=off)))
-    if now.hour != hour:
-        return False
     today = now.strftime("%Y-%m-%d")
     if _get_setting(db, "last_reminder_date", "") == today:
         return False
-    return True
+    # Scheduled midnight-to-now boundary for today in local time.
+    scheduled = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    return now >= scheduled
 
 
 def mark_reminders_done(db):
-    from routes.jobs import _set_setting
+    from routes.jobs import _set_setting, _get_setting
 
     from datetime import timezone, timedelta as _td
 

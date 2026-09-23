@@ -60,10 +60,9 @@ class EmailBuilder:
             _llm = None
         level = _llm.role_level(self.job) if _llm else "an early-career professional"
         return (
-            f"I am {level} with a proven ability to deliver results through hands-on "
-            "projects across backend engineering, data analytics, and QA. I am eager "
-            "to bring my skills and dedication to your team and contribute to the "
-            "success of your organization."
+            f"I am {level} with hands-on experience that matches the responsibilities of "
+            f"this position. I am eager to bring my dedication and willingness to learn to "
+            f"your team and contribute to the success of your organization."
         )
 
     def build_cover_letter_html(self) -> str:
