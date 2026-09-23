@@ -60,6 +60,9 @@ class Config:
     ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
     ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
     ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "in")
+    # Only "recently posted" listings (Adzuna trailing-days filter) so fetched
+    # cards are fresh/real openings, not stale reposts.
+    ADZUNA_MAX_DAYS_OLD = int(os.getenv("ADZUNA_MAX_DAYS_OLD", "3") or "3")
 
     # Applicant Details
     YOUR_NAME = os.getenv("YOUR_NAME", "Shamim Ahamed J")

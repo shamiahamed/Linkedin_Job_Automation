@@ -17,6 +17,8 @@ _ADDITIONS = [
     ("jobs", "apply_link", "VARCHAR(500)"),
     ("jobs", "has_email", "BOOLEAN"),
     ("jobs", "has_phone", "BOOLEAN"),
+    ("jobs", "saved", "BOOLEAN"),
+    ("jobs", "fetch_batch", "VARCHAR(50)"),
     ("jobs", "updated_at", "TIMESTAMPTZ DEFAULT now()"),
     ("applications", "follow_up_at", "TIMESTAMPTZ"),
     ("applications", "followed_up_at", "TIMESTAMPTZ"),

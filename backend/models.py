@@ -21,6 +21,11 @@ class Job(Base):
     has_email = Column(Boolean, default=False)
     has_phone = Column(Boolean, default=False)
     status = Column(String(20), default="pending")
+    # User-saved (⭐) — saved jobs are exempt from auto-delete/2-day fetch purge.
+    saved = Column(Boolean, default=False)
+    # Auto-fetch run marker (timestamp) so the last N fetch batches can be
+    # identified and deleted together from the dashboard.
+    fetch_batch = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -41,6 +46,8 @@ class Job(Base):
             "has_email": self.has_email,
             "has_phone": self.has_phone,
             "status": self.status,
+            "saved": bool(self.saved),
+            "fetch_batch": self.fetch_batch,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

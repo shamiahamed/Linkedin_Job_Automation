@@ -38,17 +38,23 @@ def _cache_jobs(key, items):
 
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
-    """Dashboard summary tiles: total counts per status (GET /api/stats)."""
+    """Dashboard summary tiles: total counts per status (GET /api/stats).
+    `total_jobs` is the overall DB count; `captured` = job-detection/LinkedIn
+    captures ONLY (auto-fetch is reported separately as its own category)."""
     rows = db.query(Job.status, func.count(Job.id)).group_by(Job.status).all()
-    counts = {s: c for s, c in rows if s}
-    total = sum(counts.values())
+    totals = {s: c for s, c in rows if s}
+    auto_fetch = db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0
+    total = sum(totals.values())
     return {
         "total_jobs": total,
-        "ready_to_send": counts.get("ready_to_send", 0),
-        "applied": counts.get("applied", 0),
-        "pending": counts.get("pending", 0),
-        "phone_summaries_sent": counts.get("phone_summary_sent", 0),
-        "link_emails_sent": counts.get("link_email_sent", 0),
+        "captured": total - auto_fetch,
+        "ready_to_send": totals.get("ready_to_send", 0),
+        "applied": totals.get("applied", 0),
+        "pending": totals.get("pending", 0),
+        "phone_summaries_sent": totals.get("phone_summary_sent", 0),
+        "link_emails_sent": totals.get("link_email_sent", 0),
+        "auto_fetch": auto_fetch,
+        "saved": db.query(func.count(Job.id)).filter(or_(Job.saved.is_(True), Job.saved == True)).scalar() or 0,  # noqa: E712
     }
 
 
@@ -141,10 +147,11 @@ def _notify_sent(job, to_email: str = "") -> None:
         pass
 
 
-def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False):
+def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False, fetch_batch: str = None):
     """Shared capture pipeline used by the API route AND the daily auto-fetch.
     Everything the old create_job route did: LLM refine weak captures, dedupe,
-    create the Job row, set status, auto-apply, and notify the dashboard."""
+    create the Job row, set status, auto-apply, and notify the dashboard.
+    `fetch_batch` stamps auto-fetch runs so the last N runs can be deleted."""
     _invalidate_jobs_cache()
     with _CREATE_LOCK:
         # Optional Groq refinement for weak captures (generic title, or a post with
@@ -233,6 +240,9 @@ def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False):
         if not job.emails and not job.phones:
             job.status = "apply_link" if job.apply_link else "no_contact"
 
+        if fetch_batch:
+            job.fetch_batch = fetch_batch
+
         _auto_apply_if_enabled(db, job)
         db.commit()
         db.refresh(job)
@@ -316,13 +326,14 @@ def list_jobs(
     source: Optional[str] = None,
     q: Optional[str] = None,
     since: Optional[str] = None,
+    saved: Optional[bool] = None,
     page: Optional[int] = None,
     per_page: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     # Short TTL cache: repeated dashboard reloads skip the DB round-trip
     # (Neon cold-start latency is what makes the UI feel slow).
-    key = (status or "", exp or "", source or "", q or "", since or "", page, per_page)
+    key = (status or "", exp or "", source or "", q or "", since or "", saved, page, per_page)
     hit = _jobs_cache.get("key")
     if hit == key and _time.monotonic() - _jobs_cache["ts"] < 5.0:
         return _jobs_cache["data"]
@@ -340,6 +351,10 @@ def list_jobs(
             query = query.filter(Job.status.in_(statuses))
     if source:
         query = query.filter(Job.source == source)
+    if saved:
+        query = query.filter(or_(Job.saved.is_(True), Job.saved == True))  # noqa: E712
+    elif saved is False:
+        query = query.filter(or_(Job.saved.is_(None), Job.saved == False))  # noqa: E712
     if since:
         try:
             since_dt = datetime.fromisoformat(since)
@@ -562,6 +577,10 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
             return
 
         min_months = _exp_min_months(f"{job.experience or ''} {_feed_body(job.description or '')}")
+        max_months = _exp_months(f"{job.experience or ''} {_feed_body(job.description or '')}")
+        # User preference: fresher/up-to-1-year roles auto-apply; a "1-2" listing
+        # is still OK because a 1-year candidate can attend. So a role qualifies
+        # when its LOWER bound is <= 1 year (0-1, 1, 1-2, 1-3, fresher).
         eligible = bool(job.emails) and min_months is not None and min_months <= 12
 
         if confirm and job.emails and not _has_sent(db, job.id, "email"):
@@ -587,18 +606,8 @@ def _auto_apply_if_enabled(db: Session, job: Job) -> None:
                     _notify_sent(job, result.get("to_email"))
                 elif not job.phones:
                     job.status = "pending"
-        elif not job.emails and job.apply_link and not _has_sent(db, job.id, "link_summary"):
-            # Link-only job -> email the apply link to the user's own inbox, they apply manually.
-            summary = EmailBuilder(job).send_link_summary()
-            if summary.get("success"):
-                db.add(Application(
-                    job_id=job.id,
-                    email_sent_to=summary.get("to_email"),
-                    email_response=summary.get("message_id"),
-                    type="link_summary",
-                    status="sent",
-                ))
-                job.status = "link_email_sent"
+        # Link-only jobs NO LONGER email the user a summary — they land/remain
+        # as apply-link cards on the dashboard for the user to open manually.
     except Exception:
         job.status = "pending"
 
@@ -618,9 +627,12 @@ def get_settings(db: Session = Depends(get_db)):
         "fetch_keywords": _get_setting(db, "fetch_keywords", ",".join(_js.DEFAULT_KEYWORDS)),
         "fetch_cities": _get_setting(db, "fetch_cities", ",".join(_js.DEFAULT_CITIES)),
         "fetch_max_results": int(_get_setting(db, "fetch_max_results", "200") or "200"),
+        "fetch_retention_days": int(_get_setting(db, "fetch_retention_days", "2") or "2"),
         "adzuna_configured": _js.adzuna_configured(),
         "last_fetch_at": _get_setting(db, "last_fetch_at", ""),
         "last_fetch_summary": _get_setting(db, "last_fetch_summary", ""),
+        "fetch_count": int(_get_setting(db, "fetch_count", "0") or "0"),
+        "fetch_api_calls": int(_get_setting(db, "fetch_api_calls", "0") or "0"),
     }
 
 
@@ -650,6 +662,11 @@ def update_settings(payload: dict, db: Session = Depends(get_db)):
             _set_setting(db, "fetch_max_results", str(max(10, min(200, int(payload.get("fetch_max_results"))))))
         except (TypeError, ValueError):
             pass
+    if payload.get("fetch_retention_days") is not None:
+        try:
+            _set_setting(db, "fetch_retention_days", str(max(1, min(14, int(payload.get("fetch_retention_days"))))))
+        except (TypeError, ValueError):
+            pass
     db.commit()
     return get_settings(db)
 
@@ -661,7 +678,9 @@ def _split_csv(value: str) -> list:
 def fetch_jobs_now(db: Session) -> dict:
     """Manual/triggered fetch: pull today's Adzuna India listings (keywords x
     cities) and ingest each through the shared pipeline (dedupe + auto-apply).
-    Lands them as cards when auto_apply is off, or auto-fires when on."""
+    Lands them as cards when auto_apply is off, or auto-fires when on.
+    Every run: fetch_count += 1, jobs stamped with a fetch_batch timestamp, and
+    a record of live Adzuna API calls is kept (Adzuna trial has call limits)."""
     from services import job_search as _js
     from datetime import datetime as _dt
 
@@ -674,18 +693,24 @@ def fetch_jobs_now(db: Session) -> dict:
         limit = max(10, min(200, int(_get_setting(db, "fetch_max_results", "100") or "100")))
     except Exception:
         limit = 100
-    results = _js.fetch_daily_jobs(keywords, cities, limit=limit, max_seconds=45)
+    api_calls = {}
+    results = _js.fetch_daily_jobs(keywords, cities, limit=limit, max_seconds=45, api_calls=api_calls)
     before = db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0
+    batch = _dt.utcnow().isoformat(timespec="seconds")
     for item in results:
         try:
             if not item.get("url"):
                 continue
-            ingest_job(db, JobCreate(**item), silent_push=True)
+            ingest_job(db, JobCreate(**item), silent_push=True, fetch_batch=batch)
         except Exception:
             continue
     added = (db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0) - before
+    api_searches = int(api_calls.get("searches", 0) or 0)
+    fetch_count = int(_get_setting(db, "fetch_count", "0") or "0") + 1
+    _set_setting(db, "fetch_count", str(fetch_count))
+    _set_setting(db, "fetch_api_calls", str(int(_get_setting(db, "fetch_api_calls", "0") or "0") + api_searches))
     summary = f"Fetched {len(results)} jobs, {added} new"
-    _set_setting(db, "last_fetch_at", _dt.utcnow().isoformat(timespec="seconds"))
+    _set_setting(db, "last_fetch_at", batch)
     _set_setting(db, "last_fetch_summary", summary)
     db.commit()
     _invalidate_jobs_cache()
@@ -700,13 +725,66 @@ def fetch_jobs_now(db: Session) -> dict:
             )
         except Exception:
             pass
-    return {"success": True, "fetched": len(results), "added": added, "detail": summary}
+    return {"success": True, "fetched": len(results), "added": added,
+            "api_calls": api_searches, "detail": summary}
 
 
 @router.post("/jobs/fetch-now")
 def jobs_fetch_now(db: Session = Depends(get_db)):
     """Manual trigger: fetch new jobs immediately (same pipeline as the daily run)."""
     return fetch_jobs_now(db)
+
+
+@router.post("/jobs/fetch/delete-last")
+def delete_last_fetches(payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    """Delete the auto-fetched jobs from the most recent N fetch runs (Adzuna
+    trial lists can contain junk; the user wants a quick 'delete last N runs').
+    Saved (⭐) auto-fetch jobs are kept. Deleting a run also deletes its
+    Application rows. Returns how many jobs were removed."""
+    _invalidate_jobs_cache()
+    batches = int((payload or {}).get("batches") or 2)
+    if batches < 1:
+        batches = 1
+    if batches > 20:
+        batches = 20
+    # Distinct fetch_batch timestamps for auto-fetch runs, newest first.
+    rows = db.query(Job.fetch_batch).filter(
+        Job.source == "auto_fetch",
+        Job.fetch_batch.isnot(None),
+        Job.fetch_batch != "",
+    ).distinct().order_by(Job.fetch_batch.desc()).limit(batches).all()
+    targets = [r[0] for r in rows]
+    if not targets:
+        return {"success": True, "batches": [], "deleted": 0,
+                "detail": "No previous auto-fetch runs found to delete."}
+    jobs = db.query(Job).filter(
+        Job.source == "auto_fetch",
+        Job.fetch_batch.in_(targets),
+        or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
+    ).all()
+    deleted = 0
+    for j in jobs:
+        db.query(Application).filter(Application.job_id == j.id).delete()
+        db.delete(j)
+        deleted += 1
+    db.commit()
+    return {"success": True, "batches": targets, "deleted": deleted,
+            "detail": f"Deleted {deleted} jobs from the last {len(targets)} fetch run(s)."}
+
+
+@router.post("/jobs/{job_id}/save")
+def save_job(job_id: int, payload: dict = Body(default=None), db: Session = Depends(get_db)):
+    """Toggle the ⭐ saved bookmark on a job. Saved jobs are exempt from the
+    auto-fetch 2-day purge (and from generic auto-deletes) so the user can keep
+    walk-in / interesting listings to review later."""
+    _invalidate_jobs_cache()
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    job.saved = bool((payload or {}).get("saved", not job.saved))
+    db.commit()
+    db.refresh(job)
+    return {"success": True, "id": job.id, "saved": job.saved}
 
 
 @router.post("/jobs/bulk/delete")
@@ -984,12 +1062,14 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
 
 def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
     """Delete no-contact jobs older than max_age_hours (keeps the table self-cleaning).
-    Jobs carrying an apply link are actionable and are never auto-deleted."""
+    Jobs carrying an apply link are actionable and are never auto-deleted, and
+    saved (⭐) jobs are always kept."""
     cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
     rows = db.query(Job).filter(
         Job.status == "no_contact",
         Job.created_at < cutoff,
         or_(Job.apply_link.is_(None), Job.apply_link == ""),
+        or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
     ).all()
     count = 0
     for j in rows:
@@ -1003,24 +1083,47 @@ def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
 
 def purge_old_jobs(db: Session) -> int:
     """Retention rules:
+    - auto-fetch jobs (source=="auto_fetch") auto-delete after
+      `fetch_retention_days` (default 2) — recent-jobs only, like LinkedIn
+      detection. ⭐ saved jobs are kept.
     - handled jobs (applied / phone_summary_sent / link_email_sent) auto-delete
       after `purge_handled_days` (default 5) — they're done.
     - unapplied jobs (pending / ready_to_send / duplicate / apply_link) auto-delete
       after `purge_unapplied_days` (default 14) — long-enough to act on them.
     - no_contact is cleaned separately at 24h (cleanup_no_contact).
+    Saved (⭐) jobs are NEVER auto-deleted by any rule.
     Applied history is therefore NOT kept; the dashboard self-cleans."""
     handled_days = int(_get_setting(db, "purge_handled_days", "5") or "5")
     unapplied_days = int(_get_setting(db, "purge_unapplied_days", "14") or "14")
+    fetch_days = int(_get_setting(db, "fetch_retention_days", "2") or "2")
     count = 0
 
-    def _purge(days: int, statuses: list):
+    def _delete(j):
         nonlocal count
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        rows = db.query(Job).filter(Job.status.in_(statuses), Job.created_at < cutoff).all()
-        for j in rows:
+        for _ in [j]:
             db.query(Application).filter(Application.job_id == j.id).delete()
             db.delete(j)
             count += 1
+
+    def _purge(days: int, statuses: list):
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        rows = db.query(Job).filter(
+            Job.status.in_(statuses),
+            Job.created_at < cutoff,
+            or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
+        ).all()
+        for j in rows:
+            _delete(j)
+
+    # Auto-fetch recent-jobs retention (default 2 days), saved kept.
+    fetch_cutoff = datetime.utcnow() - timedelta(days=fetch_days)
+    fetched_rows = db.query(Job).filter(
+        Job.source == "auto_fetch",
+        Job.created_at < fetch_cutoff,
+        or_(Job.saved.is_(None), Job.saved == False),  # noqa: E712
+    ).all()
+    for j in fetched_rows:
+        _delete(j)
 
     _purge(handled_days, ["applied", "phone_summary_sent", "link_email_sent"])
     _purge(unapplied_days, ["pending", "ready_to_send", "duplicate", "apply_link"])

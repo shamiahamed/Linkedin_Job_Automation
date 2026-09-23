@@ -20,17 +20,35 @@ from config import Config
 
 logger = logging.getLogger("uvicorn.error")
 
-# Indian metropolitan cities (broad coverage beyond Tamil Nadu).
+# Indian cities — user preference: ONLY south-India + Tamil Nadu (all districts),
+# plus Kochi (Kerala). No north cities at all (Mumbai removed too).
 DEFAULT_CITIES = [
-    "Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Chennai", "Kolkata",
-    "Pune", "Ahmedabad", "Gurugram", "Noida", "Jaipur", "Thane",
-    # Tamil Nadu — all major districts/cities
+    "Bengaluru", "Hyderabad", "Chennai", "Kochi",
+    # Tamil Nadu — all districts
     "Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem",
     "Tirunelveli", "Erode", "Vellore", "Hosur", "Thanjavur", "Kumbakonam",
     "Karaikudi", "Nagercoil", "Thoothukudi", "Tiruppur", "Cuddalore",
     "Dharmapuri", "Dindigul", "Nagapattinam", "Pudukkottai", "Ramanathapuram",
     "Sivaganga", "Tenkasi", "Viluppuram", "Virudhunagar", "Krishnagiri",
+    "Ariyalur", "Kallakurichi", "Kanchipuram", "Karur", "Mayiladuthurai",
+    "Namakkal", "Nilgiris", "Perambalur", "Ranipet", "Theni",
+    "Tiruvallur", "Tiruvannamalai", "Tiruvarur",
 ]
+
+# Walk-in interviews — user wants them covered, but ONLY from Tamil Nadu areas,
+# Chennai, Bengaluru and Kerala/Kochi (NOT Mumbai/Hyderabad).
+WALKIN_KEYWORDS = ["walk in", "walkin", "walk in interview", "walk-in interview"]
+WALKIN_ALLOWED_CITIES = {
+    "Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem",
+    "Tirunelveli", "Erode", "Vellore", "Hosur", "Thanjavur", "Kumbakonam",
+    "Karaikudi", "Nagercoil", "Thoothukudi", "Tiruppur", "Cuddalore",
+    "Dharmapuri", "Dindigul", "Nagapattinam", "Pudukkottai", "Ramanathapuram",
+    "Sivaganga", "Tenkasi", "Viluppuram", "Virudhunagar", "Krishnagiri",
+    "Ariyalur", "Kallakurichi", "Kanchipuram", "Karur", "Mayiladuthurai",
+    "Namakkal", "Nilgiris", "Perambalur", "Ranipet", "Theni",
+    "Tiruvallur", "Tiruvannamalai", "Tiruvarur",
+    "Bengaluru", "Kochi",  # walk-ins also allowed here
+}
 
 # Mainly IT / software, but "all roles" — broad set of searches.
 DEFAULT_KEYWORDS = [
@@ -44,6 +62,8 @@ DEFAULT_KEYWORDS = [
     "product manager", "project manager", "business analyst",
     "it support", "cyber security", "hr", "sales", "accountant",
     "digital marketing", "content writer", "fresher",
+    # Walk-in interviews (TN / Chennai / Bengaluru / Kochi areas only)
+    "walk in", "walk in interview",
 ]
 
 
@@ -77,7 +97,7 @@ def search_keyword_city(keyword: str, city: str, page: int = 1) -> list:
         "what": keyword,
         "where": city,
         "results_per_page": 20,
-        "max_days_old": 7,
+        "max_days_old": Config.ADZUNA_MAX_DAYS_OLD,
         "sort_by": "date",
         "content-type": "application/json",
     }
@@ -116,10 +136,14 @@ def to_job_dict(result: dict, city: str) -> dict:
     }
 
 
-def fetch_daily_jobs(keywords=None, cities=None, limit: int = 200, max_seconds: float = 60.0) -> list:
+def fetch_daily_jobs(keywords=None, cities=None, limit: int = 200, max_seconds: float = 60.0,
+                     api_calls: dict = None) -> list:
     """Search keyword x city pairs (newest order) until the result limit OR the
     time budget is hit — a run always finishes instead of hanging on slow/empty
-    searches. Cities are deduped so metro+TN lists share 'Chennai' only once."""
+    searches. Cities are deduped so metro+TN lists share 'Chennai' only once.
+    Walk-in keywords are searched only in walk-in-allowed cities (TN/Bengaluru/
+    Kochi per user). `api_calls` (optional dict) gets {"searches": n} filled in
+    so the caller can report how many live Adzuna API calls the run made."""
     keywords = keywords or DEFAULT_KEYWORDS
     cities = list(dict.fromkeys(cities or DEFAULT_CITIES))
     jobs = []
@@ -127,20 +151,31 @@ def fetch_daily_jobs(keywords=None, cities=None, limit: int = 200, max_seconds: 
     if not adzuna_configured():
         return jobs
     deadline = time.monotonic() + max_seconds
-    pairs = [(kw, city) for kw in keywords for city in cities]
-    for kw, city in pairs:
-        if time.monotonic() > deadline:
-            break
-        for result in search_keyword_city(kw, city):
-            j = to_job_dict(result, city)
-            if not j["title"]:
+    walkin = {k.lower() for k in WALKIN_KEYWORDS}
+    allowed = {c.lower() for c in WALKIN_ALLOWED_CITIES}
+    searches = 0
+    for kw in keywords:
+        for city in cities:
+            # Walk-in interviews: restrict to TN + Bengaluru + Kochi only.
+            if kw.lower() in walkin and city.lower() not in allowed:
                 continue
-            key = (j["title"].lower(), j["url"], j["company"].lower())
-            if key in seen:
-                continue
-            seen.add(key)
-            jobs.append(j)
-            if len(jobs) >= limit or time.monotonic() > deadline:
-                return jobs
+            if time.monotonic() > deadline:
+                break
+            searches += 1
+            for result in search_keyword_city(kw, city):
+                j = to_job_dict(result, city)
+                if not j["title"]:
+                    continue
+                key = (j["title"].lower(), j["url"], j["company"].lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                jobs.append(j)
+                if len(jobs) >= limit or time.monotonic() > deadline:
+                    if api_calls is not None:
+                        api_calls["searches"] = searches
+                    return jobs
         time.sleep(0.1)
+    if api_calls is not None:
+        api_calls["searches"] = searches
     return jobs

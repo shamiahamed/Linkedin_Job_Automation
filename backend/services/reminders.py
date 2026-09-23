@@ -61,7 +61,9 @@ def _card(title: str, msg: str) -> str:
            f"<h3 style='margin:0 0 8px;color:#0a66c2'>{title}</h3><p style='margin:0;color:#333'>{msg}</p></div>"
 
 
-def _run_unapplied(db, push, email_too=True):
+def _run_unapplied(db, push, email_too=False):
+    """Push-only daily nudge about unapplied jobs. No inbox EMAIL (the user wants
+    emails ONLY for contact summaries and the final-day deletion warning)."""
     from routes.jobs import _get_setting
     from models import Job
 
@@ -79,25 +81,47 @@ def _run_unapplied(db, push, email_too=True):
 
 
 def _run_final_day(db, push, email_too=True):
+    """Final-day auto-delete warning — the ONE reminder email the user wants
+    (plus the push). Covers both regular captures and auto-fetch jobs expiring
+    after their 2-day retention."""
     from routes.jobs import _get_setting
     from models import Job
 
     unapplied_days = int(_get_setting(db, "purge_unapplied_days", "14") or "14")
+    fetch_days = int(_get_setting(db, "fetch_retention_days", "2") or "2")
     statuses = ["pending", "ready_to_send", "duplicate", "apply_link"]
     n = _row_count(db, statuses, min_age_days=unapplied_days - 1, max_age_days=unapplied_days)
-    if n <= 0:
+
+    # Auto-fetch jobs (source=auto_fetch) expire after fetch_retention_days (2).
+    fetch_n = _row_count(db, statuses, min_age_days=fetch_days - 1, max_age_days=fetch_days)
+    fetch_lines = []
+    if fetch_n:
+        auto_fetch_rows = db.query(Job).filter(
+            Job.source == "auto_fetch",
+            Job.status.in_(statuses),
+            Job.created_at < datetime.utcnow() - timedelta(days=fetch_days - 1),
+            Job.created_at >= datetime.utcnow() - timedelta(days=fetch_days),
+        ).limit(4).all()
+        fetch_lines = [f"{j.title or 'Untitled'} @ {j.company or 'unknown'} (auto-fetch)" for j in auto_fetch_rows]
+
+    total = n + fetch_n
+    if total <= 0:
         return
-    items = _titles(db, statuses, min_age_days=unapplied_days - 1)
+    items = _titles(db, statuses, min_age_days=unapplied_days - 1) if n else []
+    items += fetch_lines
     push("⚠️ Auto-delete in 24h",
-         f"{n} job" + ("s" if n != 1 else "") + " will be permanently deleted tomorrow. "
-         "Apply or save them now.", "/dashboard")
+         f"{total} job" + ("s" if total != 1 else "") + " will be permanently deleted tomorrow. "
+         "Apply or ⭐ save them now.", "/dashboard")
     if email_too:
-        _email_user(f"⚠️ {n} job" + ("s" if n != 1 else "") + " auto-delete tomorrow",
-                    _card("Final-day warning", f"These will be removed in 24h. Apply them in the dashboard if you still want them."
+        _email_user(f"⚠️ {total} job" + ("s" if total != 1 else "") + " auto-delete tomorrow",
+                    _card("Final-day warning", f"These will be removed in 24h. Apply them in the dashboard "
+                          "if you still want them, or ⭐ save to keep."
                           + _bullet(items)))
 
 
-def _run_followup_due(db, push, email_too=True):
+def _run_followup_due(db, push, email_too=False):
+    """Push-only follow-up nudge. No inbox EMAIL (user wants emails ONLY for
+    contact summaries and the final-day deletion warning)."""
     from routes.jobs import _get_setting
     from models import Application, Job
 

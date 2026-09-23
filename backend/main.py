@@ -42,7 +42,8 @@ if Config.DATABASE_URL.startswith("sqlite"):
 
         with engine.connect() as _conn:
             _cols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(jobs)")).fetchall()]
-            for _col, _def in (("apply_link", "TEXT"), ("updated_at", "DATETIME")):
+            for _col, _def in (("apply_link", "TEXT"), ("updated_at", "DATETIME"),
+                               ("saved", "BOOLEAN"), ("fetch_batch", "TEXT")):
                 if _col not in _cols:
                     _conn.execute(_sql(f"ALTER TABLE jobs ADD COLUMN {_col} {_def}"))
             _conn.execute(_sql("UPDATE jobs SET updated_at = created_at WHERE updated_at IS NULL"))

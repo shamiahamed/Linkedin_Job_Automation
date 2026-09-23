@@ -71,10 +71,18 @@
             </div>
         </div>
         <!-- Stats tiles -->
-        <div class="max-w-6xl mx-auto px-4 pb-3 grid grid-cols-3 sm:grid-cols-6 gap-2">
+        <div class="max-w-6xl mx-auto px-4 pb-3 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             <button onclick="setStatus('all')" data-stat="all" class="card px-3 py-2 text-left hover:shadow">
-                <p class="text-[11px] text-gray-500">Total</p>
+                <p class="text-[11px] text-gray-500">💬 Captured</p>
                 <p id="statTotal" class="text-xl font-bold text-gray-800 leading-tight">-</p>
+            </button>
+            <button onclick="setRecent(true)" data-stat="auto_fetch" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">💾 Recent</p>
+                <p id="statAutoFetch" class="text-xl font-bold text-cyan-600 leading-tight">-</p>
+            </button>
+            <button onclick="setSavedFilter(true)" data-stat="saved" class="card px-3 py-2 text-left hover:shadow">
+                <p class="text-[11px] text-gray-500">⭐ Saved</p>
+                <p id="statSaved" class="text-xl font-bold text-amber-500 leading-tight">-</p>
             </button>
             <button onclick="setStatus('ready_to_send')" data-stat="ready_to_send" class="card px-3 py-2 text-left hover:shadow">
                 <p class="text-[11px] text-gray-500">⚠ To confirm</p>
@@ -152,6 +160,8 @@
             </div>
             <div id="statusChips" class="flex gap-2 overflow-x-auto no-scrollbar py-1">
                 <button class="chip active text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="all" onclick="setStatus('all')">All</button>
+                <button class="chip text-xs font-medium border border-cyan-300 rounded-full px-3 py-1.5" data-chip="recent" onclick="setRecent(true)">💾 Recent — auto-fetch</button>
+                <button class="chip text-xs font-medium border border-amber-300 rounded-full px-3 py-1.5" data-chip="saved" onclick="setSavedFilter(true)">⭐ Saved</button>
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="ready_to_send" onclick="setStatus('ready_to_send')">⚠ Confirm</button>
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="pending" onclick="setStatus('pending')">Pending</button>
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="applied" onclick="setStatus('applied')">Applied</button>
@@ -319,49 +329,56 @@
                         <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
                     </button>
                 </div>
-                <div class="grid grid-cols-3 gap-2 pt-1">
-                    <div>
-                        <label class="text-xs font-medium text-gray-600 block mb-1">Follow-up due (days)</label>
-                        <input id="st_followup_days" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-600 block mb-1">Delete applied (days)</label>
-                        <input id="st_purge_handled" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-600 block mb-1">Delete unapplied (days)</label>
-                        <input id="st_purge_unapplied" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
-                    </div>
-                </div>
-                <button onclick="saveRetentionSettings()" class="w-full bg-gray-800 hover:bg-gray-900 text-white rounded-md py-2 text-sm font-medium">Save retention settings</button>
-                <!-- Daily job auto-fetch -->
-                <div class="border-t border-gray-100 pt-4 space-y-2">
-                    <div class="flex items-center justify-between gap-3">
+<div class="grid grid-cols-3 gap-2 pt-1">
                         <div>
-                            <p class="font-medium text-gray-800">Auto-fetch jobs daily</p>
-                            <p class="text-xs text-gray-500">Once per day — lands as cards (you verify and fire). No auto-email unless Auto-apply is ON.</p>
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Follow-up due (days)</label>
+                            <input id="st_followup_days" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
                         </div>
-                        <button onclick="toggleSetting('auto_fetch')" id="sw_auto_fetch" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
-                            <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
-                        </button>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-600 block mb-1">Keywords (comma-separated) — IT + all roles</label>
-                        <textarea id="st_fetch_keywords" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-600 block mb-1">Cities (comma-separated) — metros + all TN cities</label>
-                        <textarea id="st_fetch_cities" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1">
-                            <label class="text-xs font-medium text-gray-600 block mb-1">Max results/day</label>
-                            <input id="st_fetch_max_results" type="number" min="10" max="500" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                        <div>
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Delete applied (days)</label>
+                            <input id="st_purge_handled" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
                         </div>
-                        <button onclick="doFetchNow()" class="mt-5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap">Fetch now</button>
+                        <div>
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Delete unapplied (days)</label>
+                            <input id="st_purge_unapplied" type="number" min="1" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                        </div>
                     </div>
-                    <div id="fetchStatus" class="text-[11px] text-gray-500"></div>
-                </div>
+                    <button onclick="saveRetentionSettings()" class="w-full bg-gray-800 hover:bg-gray-900 text-white rounded-md py-2 text-sm font-medium">Save retention settings</button>
+                    <!-- Daily job auto-fetch -->
+                    <div class="border-t border-gray-100 pt-4 space-y-2">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="font-medium text-gray-800">Auto-fetch jobs daily</p>
+                                <p class="text-xs text-gray-500">Once per day — lands as cards (you verify and fire). No auto-email unless Auto-apply is ON.</p>
+                            </div>
+                            <button onclick="toggleSetting('auto_fetch')" id="sw_auto_fetch" class="shrink-0 w-12 h-7 rounded-full bg-gray-300 transition-colors relative">
+                                <span class="absolute left-1 top-1 w-5 h-5 rounded-full bg-white shadow transition-all"></span>
+                            </button>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Keywords (comma-separated) — IT + all roles + walk-ins</label>
+                            <textarea id="st_fetch_keywords" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium text-gray-600 block mb-1">Cities (comma-separated) — south only: Bengaluru/Hyderabad/Chennai/Kochi + all TN</label>
+                            <textarea id="st_fetch_cities" rows="2" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"></textarea>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1">
+                                <label class="text-xs font-medium text-gray-600 block mb-1">Max results/day</label>
+                                <input id="st_fetch_max_results" type="number" min="10" max="500" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                            </div>
+                            <div class="flex-1">
+                                <label class="text-xs font-medium text-gray-600 block mb-1">Delete fetched after (days)</label>
+                                <input id="st_fetch_retention" type="number" min="1" max="14" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="doFetchNow()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap">Fetch now</button>
+                            <button onclick="deleteLastFetches(2)" class="flex-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap">Delete last 2 fetches</button>
+                        </div>
+                        <div id="fetchStatus" class="text-[11px] text-gray-500"></div>
+                    </div>
                 <div class="border-t border-gray-100 pt-4">
                     <p class="font-medium text-gray-800 mb-1">Profile</p>
                     <p class="text-xs text-gray-500 mb-3">Shown in emailed summaries. Backend .env remains authoritative.</p>
@@ -390,8 +407,9 @@
         const API = location.origin;
         let _settings = { auto_apply: true, confirm_before_send: false, reminders_enabled: true,
                           followup_days: 3, purge_handled_days: 5, purge_unapplied_days: 14,
-                          auto_fetch: false, fetch_keywords: '', fetch_cities: '', fetch_max_results: 200 };
-        let _filters = { status: 'all', exp: 'any', q: '' };
+                          auto_fetch: false, fetch_keywords: '', fetch_cities: '', fetch_max_results: 200,
+                          fetch_retention_days: 2, fetch_count: 0, fetch_api_calls: 0 };
+        let _filters = { status: 'all', exp: 'any', q: '', recent: false, savedOnly: false };
         let _page = 1;
         let _perPage = 10;
         let _total = 0;
@@ -469,12 +487,16 @@
             try {
                 const res = await api('/api/stats');
                 const s = await res.json();
-                document.getElementById('statTotal').textContent = s.total_jobs;
+                // 'captured' = LinkedIn/extension captures ONLY; auto-fetch is the
+                // separate Recent category (matches the user's "separate category").
+                document.getElementById('statTotal').textContent = s.captured !== undefined ? s.captured : s.total_jobs;
                 document.getElementById('statReady').textContent = s.ready_to_send;
                 document.getElementById('statApplied').textContent = s.applied;
                 document.getElementById('statPending').textContent = s.pending;
                 document.getElementById('statPhone').textContent = s.phone_summaries_sent;
                 document.getElementById('statLink').textContent = s.link_emails_sent;
+                document.getElementById('statAutoFetch').textContent = s.auto_fetch || 0;
+                document.getElementById('statSaved').textContent = s.saved || 0;
                 const dots = document.querySelectorAll('[data-stat]');
                 dots.forEach(d => { const key = d.dataset.stat; if (d.id !== 'statTotal' && s[key] !== undefined) d.style.display = ''; });
                 setOnline(true);
@@ -489,10 +511,51 @@
 
 function setStatus(s) {
                 _filters.status = s;
+                _filters.recent = false;
+                _filters.savedOnly = false;
                 _page = 1;
                 document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === s));
                 document.querySelectorAll('[data-stat]').forEach(c => c.classList.toggle('opacity-40', c.dataset.stat === s));
                 loadJobs();
+            }
+
+            function setRecent(on) {
+                _filters.recent = on;
+                _filters.savedOnly = false;
+                _filters.status = 'all';
+                _filters.q = '';
+                _page = 1;
+                document.getElementById('searchBox').value = '';
+                document.getElementById('searchClear').classList.add('hidden');
+                document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === 'recent'));
+                document.querySelectorAll('[data-stat]').forEach(c => c.classList.remove('opacity-40'));
+                loadJobs();
+            }
+
+            function setSavedFilter(on) {
+                _filters.savedOnly = on;
+                _filters.recent = false;
+                _filters.status = 'all';
+                _filters.q = '';
+                _page = 1;
+                document.getElementById('searchBox').value = '';
+                document.getElementById('searchClear').classList.add('hidden');
+                document.querySelectorAll('[data-chip]').forEach(c => c.classList.toggle('active', c.dataset.chip === 'saved'));
+                document.querySelectorAll('[data-stat]').forEach(c => c.classList.remove('opacity-40'));
+                loadJobs();
+            }
+
+            async function toggleSave(id, ev) {
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                try {
+                    const res = await api('/api/jobs/' + id + '/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                    const r = await res.json();
+                    if (r.success) {
+                        showToast(r.saved ? '⭐ Saved — kept from auto-delete' : 'Unsaved');
+                        fetchStats();
+                        if (_filters.savedOnly && !r.saved) loadJobs(); else loadJobs();
+                    }
+                } catch (e) { showToast('Could not save', true); }
             }
 
             function clearSearch() {
@@ -612,7 +675,9 @@ function setStatus(s) {
 
         async function loadJobs() {
             let qp = '?';
-            if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
+            if (_filters.recent) qp += 'source=auto_fetch';
+            else if (_filters.status !== 'all') qp += 'status=' + encodeURIComponent(_filters.status);
+            if (_filters.savedOnly) qp += (qp.length > 1 ? '&' : '') + 'saved=true';
             if (_filters.exp !== 'any') qp += (qp.length > 1 ? '&' : '') + 'exp=' + encodeURIComponent(_filters.exp);
             if (_filters.q) qp += (qp.length > 1 ? '&' : '') + 'q=' + encodeURIComponent(_filters.q);
             qp += (qp.length > 1 ? '&' : '') + 'page=' + _page + '&per_page=' + _perPage;
@@ -663,7 +728,7 @@ function setStatus(s) {
                             <input type="checkbox" class="accent-blue-600 w-4 h-4" onclick="toggleSelect(${job.id})" ${_selected.has(job.id) ? 'checked' : ''}>
                         </label>
                         <div class="min-w-0 flex-1">
-                            <p class="font-semibold text-gray-800 leading-snug">${esc(job.title || 'Untitled')}</p>
+                            <p class="font-semibold text-gray-800 leading-snug">${esc(job.title || 'Untitled')}${job.saved ? ' <span title="saved">⭐</span>' : ''}</p>
                             <p class="text-sm text-gray-500 truncate">${job.company ? esc(job.company) : '<span class="text-gray-400">unknown company</span>'}${job.location ? ' · ' + esc(job.location) : ''}</p>
                         </div>
                         ${statusBadge(job.status)}
@@ -683,6 +748,7 @@ function setStatus(s) {
                                 (job.phones && job.phones.length ?
                                     `<button onclick="applyJob(${job.id}, '${job.status}')" class="text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 bg-orange-50 rounded-md px-3 py-2">📞 Summary</button>` : ''))}
                         ${job.apply_link && !(job.emails && job.emails.length) ? `<a href="${esc(job.apply_link)}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 text-xs font-medium border border-teal-200 bg-teal-50 rounded-md px-3 py-2">🔗 Open link</a>` : ''}
+                        <button onclick="toggleSave(${job.id}, event)" class="${job.saved ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'} text-xs font-medium rounded-md px-2 py-2" title="${job.saved ? 'Saved — click to unsave' : 'Save this job (⭐ keeps it from auto-delete)'}">${job.saved ? '⭐' : '☆'}</button>
                         <button onclick="openEditModal(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Edit fields">✏️</button>
                         <button onclick="viewJob(${job.id})" class="text-gray-500 hover:text-gray-700 text-xs font-medium rounded-md px-2 py-2" title="Details">👁</button>
                         ${job.status === 'applied' ? `<button onclick="setJobStatus(${job.id},'ready_to_send')" class="text-blue-500 hover:text-blue-700 text-xs font-medium rounded-md px-2 py-2" title="Reopen Confirm & send with resume chooser">↩ Stage</button>` : ''}
@@ -1099,11 +1165,15 @@ function setStatus(s) {
                 document.getElementById('st_fetch_keywords').value = s.fetch_keywords || '';
                 document.getElementById('st_fetch_cities').value = s.fetch_cities || '';
                 document.getElementById('st_fetch_max_results').value = s.fetch_max_results || 200;
+                document.getElementById('st_fetch_retention').value = s.fetch_retention_days || 2;
                 const fs = document.getElementById('fetchStatus');
-                fs.textContent = s.adzuna_configured
-                    ? ('Source: Adzuna India ✓ — last fetch: ' + (s.last_fetch_at || 'never')
-                       + (s.last_fetch_summary ? ' (' + s.last_fetch_summary + ')' : ''))
-                    : 'Source not configured — set ADZUNA_APP_ID / ADZUNA_APP_KEY in backend .env (free signup)';
+                if (s.adzuna_configured) {
+                    fs.innerHTML = 'Source: Adzuna India ✓ — last fetch: ' + (s.last_fetch_at || 'never')
+                        + (s.last_fetch_summary ? ' (' + s.last_fetch_summary + ')' : '')
+                        + '<br>Fetched <b>' + (s.fetch_count || 0) + '</b> times · <b>' + (s.fetch_api_calls || 0) + '</b> Adzuna API calls total';
+                } else {
+                    fs.textContent = 'Source not configured — set ADZUNA_APP_ID / ADZUNA_APP_KEY in backend .env (free signup)';
+                }
             } catch (e) { /* backend offline */ }
         }
 
@@ -1114,7 +1184,8 @@ function setStatus(s) {
                 purge_unapplied_days: Number(document.getElementById('st_purge_unapplied').value) || 14,
                 fetch_keywords: document.getElementById('st_fetch_keywords').value,
                 fetch_cities: document.getElementById('st_fetch_cities').value,
-                fetch_max_results: Number(document.getElementById('st_fetch_max_results').value) || 200
+                fetch_max_results: Number(document.getElementById('st_fetch_max_results').value) || 200,
+                fetch_retention_days: Number(document.getElementById('st_fetch_retention').value) || 2
             };
             try {
                 await api('/api/settings', {
@@ -1136,6 +1207,17 @@ function setStatus(s) {
                     showToast(r.detail || 'Fetch failed', true);
                 }
             } catch (e) { showToast('Fetch failed', true); }
+        }
+
+        async function deleteLastFetches(n) {
+            if (!confirm('Delete the auto-fetched jobs from the last ' + (n || 2) + ' fetch run(s)? Saved (⭐) jobs are kept.')) return;
+            try {
+                const r = await (await api('/api/jobs/fetch/delete-last', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batches: n || 2 })
+                })).json();
+                showToast(r.detail || 'Done');
+                loadSettings(); fetchStats(); loadJobs();
+            } catch (e) { showToast('Delete failed', true); }
         }
 
         async function toggleSetting(key) {
