@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger("uvicorn.error")
@@ -1167,6 +1167,20 @@ def cleanup_no_contact(db: Session, max_age_hours: int = 24) -> int:
     return count
 
 
+def _as_utc_aware(dt_value):
+    """Coerce a DB datetime into timezone-aware UTC for safe comparisons.
+
+    PostgreSQL returns timezone-aware timestamps (timestamptz) while SQLite
+    returns naive datetime objects. Normalising both sides to UTC-aware lets
+    callers compare against a `datetime.now(timezone.utc)` cutoff without the
+    naive-vs-aware TypeError — the purge retention logic on PostgreSQL."""
+    if dt_value is None:
+        return None
+    if getattr(dt_value, "tzinfo", None) is None:
+        return dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone(timezone.utc)
+
+
 def purge_old_jobs(db: Session) -> int:
     """Retention rules:
     - auto-fetch jobs (source=="auto_fetch"):
@@ -1201,6 +1215,11 @@ def purge_old_jobs(db: Session) -> int:
     def _not_saved():
         return or_(Job.saved.is_(None), Job.saved == False)  # noqa: E712
 
+    # Cutoff for the 2-day auto-fetch retention — UTC-aware so it matches the
+    # timestamptz values PostgreSQL returns (sqlite stays unaffected: its
+    # dialect stores/compares the same wall-clock string).
+    fetch_cutoff = datetime.now(timezone.utc) - timedelta(days=fetch_days)
+
     # --- Auto-fetch stale rows (self-heal leftover/old fetches) ---
     stale = db.query(Job).filter(Job.source == "auto_fetch", _not_saved()).all()
     for j in stale:
@@ -1221,7 +1240,7 @@ def purge_old_jobs(db: Session) -> int:
             elif any(b in (j.location or "").lower() for b in outside):
                 dead = True
             # 3) Older than the 2-day fetch retention.
-            elif j.created_at and j.created_at < datetime.utcnow() - timedelta(days=fetch_days):
+            elif j.created_at and _as_utc_aware(j.created_at) < fetch_cutoff:
                 dead = True
             if dead:
                 _delete(j)
@@ -1237,7 +1256,7 @@ def purge_old_jobs(db: Session) -> int:
             print(f"[purge-skip] job {j.id}: {e!r}")
 
     def _purge(days: int, statuses: list):
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         rows = db.query(Job).filter(
             Job.status.in_(statuses),
             Job.created_at < cutoff,
