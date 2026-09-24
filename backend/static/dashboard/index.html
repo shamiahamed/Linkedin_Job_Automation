@@ -169,6 +169,35 @@
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="link_email_sent" onclick="setStatus('link_email_sent')">🔗 Link</button>
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="duplicate" onclick="setStatus('duplicate')">Duplicate</button>
                 <button class="chip text-xs font-medium border border-gray-300 rounded-full px-3 py-1.5" data-chip="no_contact" onclick="setStatus('no_contact')">No contact</button>
+                <button class="chip text-xs font-medium border border-indigo-300 rounded-full px-3 py-1.5" data-chip="automation" onclick="showAutomation()">🤖 Automation</button>
+            </div>
+        </section>
+
+        <!-- Automation / Workflow (read-only; Phase 7) -->
+        <section id="automationView" class="hidden space-y-4">
+            <div id="autoLoading" class="card p-10 text-center text-gray-400 text-sm">Loading automation status…</div>
+            <div id="autoBody" class="hidden space-y-4">
+                <section class="card p-4">
+                    <h2 class="font-semibold text-gray-800 text-base">🖥️ System status</h2>
+                    <p class="text-[11px] text-gray-400 mt-0.5">Read-only — this view observes the system, it never controls it.</p>
+                    <div id="sysStatus" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mt-3"></div>
+                </section>
+                <section class="card p-4">
+                    <h2 class="font-semibold text-gray-800 text-base">⚙️ Workflow runs</h2>
+                    <div id="workflowRuns" class="mt-3 space-y-2"></div>
+                </section>
+                <section class="card p-4">
+                    <h2 class="font-semibold text-gray-800 text-base">📡 Source activity</h2>
+                    <div id="sourceActivity" class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3"></div>
+                </section>
+                <section class="card p-4">
+                    <h2 class="font-semibold text-gray-800 text-base">🤖 Agent activity</h2>
+                    <div id="agentActivity" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3"></div>
+                </section>
+                <section class="card p-4">
+                    <h2 class="font-semibold text-gray-800 text-base">🕓 Recent activity</h2>
+                    <div id="recentActivity" class="mt-3"></div>
+                </section>
             </div>
         </section>
 
@@ -272,6 +301,17 @@
                 </div>
                 <button onclick="saveJobEdit()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md py-2.5">Save changes</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Job details modal -->
+    <div id="detailsModal" class="modal hidden fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="modal-panel bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto">
+            <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="font-bold text-gray-800">👁 Job details</h3>
+                <button onclick="closeModal('detailsModal')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 space-y-3 text-sm" id="detailsBody"></div>
         </div>
     </div>
 
@@ -418,6 +458,7 @@
         let _selected = new Set();
         let _editJob = null;
         let _appsCache = [];
+        let _view = 'jobs'; // 'jobs' | 'automation'
 
         /* ============ auth / api ============ */
         function showLogin() {
@@ -509,7 +550,33 @@
             if (!on && !navigator.onLine) showOffline(true);
         }
 
-function setStatus(s) {
+function showJobsView() {
+                if (_view === 'jobs') return true;
+                _view = 'jobs';
+                document.getElementById('automationView').classList.add('hidden');
+                document.getElementById('captureBody').closest('section').style.display = '';
+                document.getElementById('statusChips').closest('section').style.display = '';
+                document.getElementById('jobsWrap').style.display = '';
+                document.querySelectorAll('[data-chip]').forEach(c => {
+                    if (c.dataset.chip === 'automation') c.classList.remove('active');
+                });
+                return true;
+            }
+
+            function showAutomation() {
+                _view = 'automation';
+                document.getElementById('captureBody').closest('section').style.display = 'none';
+                document.getElementById('statusChips').closest('section').style.display = 'none';
+                document.getElementById('jobsWrap').style.display = 'none';
+                document.querySelectorAll('[data-chip]').forEach(c =>
+                    c.classList.toggle('active', c.dataset.chip === 'automation'));
+                document.querySelectorAll('[data-stat]').forEach(c => c.classList.remove('opacity-40'));
+                document.getElementById('automationView').classList.remove('hidden');
+                fetchAutomation();
+            }
+
+            function setStatus(s) {
+                if (_view === 'automation') showJobsView();
                 _filters.status = s;
                 _filters.recent = false;
                 _filters.savedOnly = false;
@@ -520,6 +587,7 @@ function setStatus(s) {
             }
 
             function setRecent(on) {
+                if (_view === 'automation') showJobsView();
                 _filters.recent = on;
                 _filters.savedOnly = false;
                 _filters.status = 'all';
@@ -533,6 +601,7 @@ function setStatus(s) {
             }
 
             function setSavedFilter(on) {
+                if (_view === 'automation') showJobsView();
                 _filters.savedOnly = on;
                 _filters.recent = false;
                 _filters.status = 'all';
@@ -620,6 +689,43 @@ function setStatus(s) {
             const label = { ready_to_send: '⚠ Confirm', apply_link: 'apply link', link_email_sent: 'link sent',
                 phone_summary_sent: 'phone summary', no_contact: 'no contact' }[status] || status.replace(/_/g, ' ');
             return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${map[status] || 'bg-gray-100 text-gray-600'}">${label}</span>`;
+        }
+
+        function signalGlyph(matched) {
+            if (matched === true) return '<span class="text-emerald-600 font-medium">✓</span>';
+            if (matched === false) return '<span class="text-red-400 font-medium">✗</span>';
+            return '<span class="text-gray-300">—</span>';
+        }
+
+        function intelChip(job) {
+            const ji = job.job_intelligence;
+            if (!ji || ji.intelligence_status !== 'ok') return '';
+            const map = {
+                matched: 'bg-emerald-100 text-emerald-700',
+                needs_review: 'bg-amber-100 text-amber-700',
+                not_matched: 'bg-red-100 text-red-700',
+                unavailable: 'bg-gray-100 text-gray-500'
+            };
+            const label = { matched: '✓ Match', needs_review: 'Review', not_matched: 'Low match', unavailable: 'Unavailable' }[ji.match_status] || ji.match_status;
+            return `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${map[ji.match_status] || 'bg-gray-100 text-gray-500'}" title="Automatic job↔profile match">${label}</span>`;
+        }
+
+        function intelStrip(job) {
+            const ji = job.job_intelligence && job.job_intelligence.intelligence_status === 'ok' ? job.job_intelligence : null;
+            const ja = job.job_analysis && job.job_analysis.analysis_status === 'ok' ? job.job_analysis : null;
+            if (!ji && !ja) return '';
+            const chips = [];
+            if (ji) {
+                chips.push(`<span class="text-xs font-bold text-gray-700" title="Job↔profile matching score — not a hiring guarantee">${ji.match_score ?? '-'}/100</span>`);
+                if (ji.walk_in || (ja && ja.walk_in && ja.walk_in.is_walk_in)) chips.push('<span class="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">🚶 Walk-in</span>');
+                if ((ji.matched_skills || []).length) chips.push(`<span class="text-[10px] font-medium text-emerald-700">✓ ${ji.matched_skills.length} skill${ji.matched_skills.length > 1 ? 's' : ''}</span>`);
+                if ((ji.concerns || []).length) chips.push(`<span class="text-[10px] font-medium text-amber-700">⚠ ${ji.concerns.length}</span>`);
+            } else if (ja) {
+                const om = ja.overall_match;
+                if (om) chips.push(`<span class="text-[11px] font-semibold ${om.is_match === true ? 'text-emerald-700' : om.is_match === false ? 'text-red-500' : 'text-amber-600'}">${om.is_match === true ? 'Match' : om.is_match === false ? 'No match' : 'Review'}</span>`);
+                if (ja.walk_in && ja.walk_in.is_walk_in) chips.push('<span class="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">🚶 Walk-in</span>');
+            }
+            return `<div class="flex items-center gap-2 flex-wrap">${intelChip(job)}${chips.join('')}</div>`;
         }
 
         function esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -749,6 +855,7 @@ function setStatus(s) {
                         <span>🎯 ${compactExp(job)}${job.salary ? ' · 💰 ' + esc(job.salary) : ''}</span>
                         <span class="flex items-center gap-1">${isNew(job) ? '<span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" title="captured recently"></span>' : ''}${timeAgo(job.created_at)}${isEdited(job) ? '<span class="text-gray-400 opacity-80">· edited ' + timeAgo(job.updated_at) + '</span>' : ''}</span>
                     </p>
+                    ${intelStrip(job)}
                     <div class="flex items-center gap-2 pt-1 flex-wrap">
                         ${job.status === 'applied' ?
                             `<button onclick="followUpJob(${job.id})" class="text-blue-600 hover:text-blue-800 text-xs font-medium border border-blue-200 bg-blue-50 rounded-md px-3 py-2">${followed ? 'Follow-up again ➤' : '✉️ Follow-up'}</button>` : ''}
@@ -943,10 +1050,103 @@ function setStatus(s) {
 
         function viewJob(id) {
             api('/api/jobs/' + id).then(r => r.json()).then(job => {
-                const dupNote = job.status === 'duplicate'
-                    ? '\n\n⚠ SAME EMAIL ALREADY RECEIVED AN APPLICATION.\nVerify before re-applying.\n' : '';
-                window.alert(`Position: ${job.title || '-'}\nCompany: ${job.company || '-'}\nLocation: ${job.location || '-'}\nExperience: ${job.experience || '-'}\nEmails: ${(job.emails || []).join(', ') || '-'}\nPhones: ${(job.phones || []).join(', ') || '-'}\nApply Link: ${job.apply_link || '-'}${dupNote}\n\n${(job.description || '').substring(0, 1200)}`);
-            });
+                document.getElementById('detailsBody').innerHTML = detailsHtml(job);
+                openModal('detailsModal');
+            }).catch(() => showToast('Could not load job details', true));
+        }
+
+        function detailsHtml(job) {
+            const dupNote = job.status === 'duplicate'
+                ? '<p class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">⚠ SAME EMAIL ALREADY RECEIVED AN APPLICATION. Verify before re-applying.</p>' : '';
+            const desc = (job.description || '').trim()
+                ? `<div class="bg-gray-50 rounded-lg p-3"><p class="text-[11px] text-gray-400 mb-1">Description</p><p class="text-xs text-gray-700 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${esc(job.description)}</p></div>` : '';
+            const applyLink = job.apply_link
+                ? `<a href="${esc(job.apply_link)}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-800 text-xs font-medium border border-teal-200 bg-teal-50 rounded-md px-3 py-1.5">🔗 Open apply link</a>` : '';
+            const grid = [
+                ['📧 Email', (job.emails || []).join(', ')],
+                ['📞 Phone', (job.phones || []).join(', ')],
+                ['🎯 Experience', compactExp(job)],
+                ['💰 Salary', job.salary]
+            ].filter(kv => kv[1]).map(kv =>
+                `<div class="bg-gray-50 rounded-lg p-2"><p class="text-[11px] text-gray-400">${kv[0]}</p><p class="font-medium text-gray-700 break-all">${esc(kv[1])}</p></div>`
+            ).join('');
+            return `
+                <p class="text-lg font-semibold text-gray-800 leading-snug">${esc(job.title || 'Untitled')}</p>
+                <p class="text-sm text-gray-500">${job.company ? esc(job.company) : '<span class="text-gray-400">unknown company</span>'}${job.location ? ' · ' + esc(job.location) : ''}</p>
+                <div class="flex items-center gap-2 flex-wrap">${statusBadge(job.status)}${applyLink}</div>
+                ${dupNote}
+                <div class="grid grid-cols-2 gap-2">${grid}</div>
+                ${desc}
+                ${assessmentHtml(job)}`;
+        }
+
+        function assessmentHtml(job) {
+            const ja = job.job_analysis && job.job_analysis.analysis_status === 'ok' ? job.job_analysis : null;
+            const ji = job.job_intelligence && job.job_intelligence.intelligence_status === 'ok' ? job.job_intelligence : null;
+            if (!ja && !ji) {
+                return `<div class="border-t border-gray-100 pt-3">
+                    <p class="font-semibold text-gray-800 mb-1">🎯 Assessment</p>
+                    <p class="text-[11px] text-gray-400">Analysis unavailable — the job predates analysis/intelligence, or it's switched off.</p>
+                </div>`;
+            }
+            const sig = key => {
+                if (ji && key in ji) return ji[key];
+                if (ja && ja[key]) return ja[key].matched;
+                return null;
+            };
+            const rows = ['role_match', 'experience_match', 'location_match', 'skill_match', 'seniority_match'];
+            const labels = ['Role', 'Experience', 'Location', 'Skills', 'Seniority'];
+            const signalRow = rows.map((k, i) =>
+                `<span class="inline-flex items-center gap-1.5 text-xs text-gray-600"><span class="w-4 text-center">${signalGlyph(sig(k))}</span>${labels[i]}</span>`
+            ).join('');
+            let reasons = [], concerns = [];
+            if (ji) {
+                reasons = ji.reasons || [];
+                concerns = ji.concerns || [];
+            } else {
+                ['role', 'experience', 'skills', 'location', 'seniority'].forEach(k => {
+                    const s = ja[k];
+                    if (s && s.reason) { if (s.matched) reasons.push(s.reason); else concerns.push(s.reason); }
+                });
+            }
+            const score = ji && typeof ji.match_score === 'number'
+                ? `<div class="text-center bg-gray-50 rounded-lg p-3">
+                     <p class="text-2xl font-bold text-gray-800 leading-none">${ji.match_score}<span class="text-sm font-medium text-gray-400"> / 100</span></p>
+                     <p class="text-[10px] text-gray-400 mt-1">job↔profile matching score</p>
+                   </div>` : '';
+            const walkin = (ji && ji.walk_in) || (ja && ja.walk_in && ja.walk_in.is_walk_in);
+            const sub = ja && ja.overall_match && ja.overall_match.summary ? ja.overall_match.summary : '';
+            const items = [];
+            if (score) items.push(score);
+            if (walkin) items.push('<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-lg p-2 text-center">🚶 Walk-in interview</span>');
+            const metaLine = ji && ji.evaluated_at
+                ? `<p class="text-[10px] text-gray-400 text-center">assessed ${timeAgo(ji.evaluated_at)}${ji.llm_enriched ? ' · AI enhanced' : ''}</p>` : '';
+            const matchedSkills = ji && (ji.matched_skills || []).length
+                ? `<div><p class="text-[11px] text-gray-400 mb-1">✓ Skills seen in the post</p><div class="flex flex-wrap gap-1">${ji.matched_skills.map(s => `<span class="text-[11px] text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">${esc(s)}</span>`).join('')}</div></div>` : '';
+            const missingSkills = ji && (ji.missing_skills || []).length
+                ? `<div><p class="text-[11px] text-gray-400 mb-1">− Skills not clearly named</p><div class="flex flex-wrap gap-1">${ji.missing_skills.map(s => `<span class="text-[11px] text-gray-600 bg-gray-100 rounded-full px-2 py-0.5">${esc(s)}</span>`).join('')}</div></div>` : '';
+            const reasonBlock = reasons.length
+                ? `<div><p class="text-[11px] text-gray-400 mb-1">✓ Why it matches</p><ul class="space-y-1">${reasons.map(r => `<li class="text-xs text-gray-700 flex gap-1.5"><span class="text-emerald-600">•</span><span>${esc(r)}</span></li>`).join('')}</ul></div>` : '';
+            const concernBlock = concerns.length
+                ? `<div><p class="text-[11px] text-gray-400 mb-1">⚠ Things to check</p><ul class="space-y-1">${concerns.map(r => `<li class="text-xs text-amber-800 flex gap-1.5"><span>•</span><span>${esc(r)}</span></li>`).join('')}</ul></div>` : '';
+            const summary = ji && (ji.summary || '').trim()
+                ? `<div class="rounded-lg bg-blue-50 border border-blue-100 p-3"><p class="text-[11px] text-blue-500 mb-1">AI summary</p><p class="text-xs text-gray-700">${esc(ji.summary)}</p></div>` : '';
+            return `
+                <div class="border-t border-gray-100 pt-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="font-semibold text-gray-800">🎯 Assessment</p>
+                        ${intelChip(job)}
+                    </div>
+                    ${sub ? `<p class="text-xs text-gray-500 mb-2">${esc(sub)}</p>` : ''}
+                    ${items.length ? `<div class="grid grid-cols-2 gap-2 mb-2">${items.join('')}</div>` : ''}
+                    ${metaLine}
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-gray-50 p-3 mt-1">${signalRow}</div>
+                    ${matchedSkills}
+                    ${missingSkills}
+                    ${reasonBlock}
+                    ${concernBlock}
+                    ${summary}
+                </div>`;
         }
 
         /* ============ confirm flow ============ */
@@ -1552,6 +1752,194 @@ function setStatus(s) {
             }
         }
 
+        /* ============ automation view (read-only) ============ */
+        function aBadge(text, tone) {
+            const map = {
+                green: 'bg-emerald-100 text-emerald-700',
+                red: 'bg-red-100 text-red-700',
+                amber: 'bg-amber-100 text-amber-700',
+                gray: 'bg-gray-100 text-gray-600',
+                blue: 'bg-blue-100 text-blue-700'
+            };
+            return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${map[tone] || map.gray}">${esc(text)}</span>`;
+        }
+
+        function aTime(iso) { return iso ? timeAgo(iso) : '<span class="text-gray-400">Not available</span>'; }
+
+        function aStatBox(icon, label, tone, text, lines) {
+            return `<div class="rounded-xl border border-gray-200 p-3 bg-gray-50/60">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs font-medium text-gray-600">${icon} ${esc(label)}</p>
+                    ${aBadge(text, tone)}
+                </div>
+                ${(lines || []).map(l => `<p class="text-[11px] text-gray-500 mt-1">${l}</p>`).join('')}
+            </div>`;
+        }
+
+        function renderSystemStatus(r) {
+            const li = r.sources.linkedin;
+            const ana = r.agents.job_analysis;
+            const intel = r.agents.job_intelligence;
+            const rd = r.readiness;
+            const liTone = li.status === 'Available' ? 'green' : 'gray';
+            const boxes = [
+                aStatBox('🔍', 'LinkedIn Detector', liTone, li.status, [
+                    'Event-driven capture',
+                    li.last_capture_at
+                        ? `${li.captures_total} capture(s) · last ${timeAgo(li.last_capture_at)}`
+                        : (li.captures_total ? `${li.captures_total} capture(s)` : 'No captures recorded yet')
+                ]),
+                aStatBox('🧠', 'Job Analysis', ana.enabled ? 'green' : 'gray', ana.enabled ? 'Enabled' : 'Disabled', [
+                    'LLM ' + (ana.llm_enabled ? 'enabled' : 'deterministic only'),
+                    `${ana.jobs_analyzed} analyzed${ana.failures ? ' · ' + ana.failures + ' failed' : ''}`
+                ]),
+                aStatBox('🎯', 'Job Intelligence', intel.enabled ? 'green' : 'gray', intel.enabled ? 'Enabled' : 'Disabled', [
+                    'LLM ' + (intel.llm_enabled ? 'enabled' : 'deterministic only'),
+                    `${intel.jobs_evaluated} evaluated`
+                ]),
+                aStatBox('🕐', 'Temporal', rd.temporal_configured ? 'blue' : 'gray',
+                    rd.temporal_configured ? 'Configured' : 'Not configured',
+                    rd.temporal_configured
+                        ? ['Connection: Unknown (no live check)', 'Fetch handed off to the Temporal worker']
+                        : ['Built-in scheduler does the daily fetch'])
+                ,
+                aStatBox('🗄️', 'Database', rd.database_configured ? 'green' : 'red',
+                    rd.database_configured ? 'Connected' : 'Not configured', []),
+            ];
+            document.getElementById('sysStatus').innerHTML = boxes.join('');
+        }
+
+        function renderWorkflows(w) {
+            const f = w.external_job_fetch;
+            const tone = { completed: 'green', failed: 'red', never: 'gray', not_configured: 'red' }[f.status] || 'gray';
+            const label = { completed: 'Completed', failed: 'Failed', never: 'Never ran', not_configured: 'Not configured' }[f.status] || f.status;
+            const line = f.last_run
+                ? `Last run: ${f.last_found} found · ${f.last_ingested} new`
+                : 'No run recorded yet — automatic fetch has not completed here.';
+            document.getElementById('workflowRuns').innerHTML = `
+                <div class="rounded-xl border border-gray-200 p-4">
+                    <div class="flex items-center justify-between gap-2 flex-wrap">
+                        <p class="font-semibold text-gray-800 text-sm">📥 ${esc(f.name)}</p>
+                        ${aBadge(label, tone)}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">${esc(line)}</p>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-3 text-xs">
+                        <p class="text-gray-500">Frequency</p><p class="text-gray-800 font-medium text-right">${esc(f.frequency)}</p>
+                        <p class="text-gray-500">Last run</p><p class="text-gray-800 font-medium text-right">${aTime(f.last_run)}</p>
+                        <p class="text-gray-500">Next run</p><p class="text-gray-400 font-medium text-right">Not available</p>
+                        <p class="text-gray-500">Runs recorded</p><p class="text-gray-800 font-medium text-right">${f.runs_total}</p>
+                    </div>
+                </div>`;
+        }
+
+        function renderSources(s) {
+            const li = s.linkedin, rss = s.google_rss, ad = s.adzuna;
+            const rssRunText = rss.last_fetch_at
+                ? `${rss.jobs_found} found · ${rss.jobs_ingested} new`
+                : 'No run recorded yet';
+            const adRunText = ad.last_fetch_at
+                ? `${ad.jobs_found} found · ${ad.jobs_ingested} new`
+                : 'No run recorded yet';
+            const cards = [
+                `<div class="rounded-xl border border-gray-200 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-sm font-semibold text-gray-800">🔗 LinkedIn</p>
+                        ${aBadge(li.status, li.status === 'Available' ? 'green' : 'gray')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">Type: Event-driven</p>
+                    <p class="text-[11px] text-gray-500">${li.captures_total} capture(s) · last ${li.last_capture_at ? timeAgo(li.last_capture_at) : 'never'}</p>
+                </div>`,
+                `<div class="rounded-xl border border-gray-200 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-sm font-semibold text-gray-800">📰 Google RSS</p>
+                        ${aBadge(rss.enabled ? 'Enabled' : 'Disabled', rss.enabled ? 'green' : 'gray')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">Last fetch: ${aTime(rss.last_fetch_at)}</p>
+                    <p class="text-[11px] text-gray-500">${esc(rssRunText)}</p>
+                </div>`,
+                `<div class="rounded-xl border border-gray-200 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-sm font-semibold text-gray-800">🌐 Adzuna</p>
+                        ${aBadge(ad.configured ? 'Configured' : 'Not configured', ad.configured ? 'green' : 'gray')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">Last fetch: ${aTime(ad.last_fetch_at)}</p>
+                    <p class="text-[11px] text-gray-500">${esc(adRunText)}</p>
+                    <p class="text-[11px] text-gray-400">${ad.api_calls_total} Adzuna API call(s) total</p>
+                </div>`,
+            ];
+            document.getElementById('sourceActivity').innerHTML = cards.join('');
+        }
+
+        function renderAgents(a) {
+            const ana = a.job_analysis, intel = a.job_intelligence;
+            const anaHas = ana.jobs_analyzed > 0 || !!ana.last_activity;
+            const intelHas = intel.jobs_evaluated > 0 || !!intel.last_activity;
+            const chip = (n, label) => `<span class="text-[11px] font-medium bg-gray-100 text-gray-700 rounded-full px-2 py-0.5 whitespace-nowrap">${n} ${label}</span>`;
+            const anaCard = `
+                <div class="rounded-xl border border-gray-200 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-sm font-semibold text-gray-800">🧠 Job Analysis</p>
+                        ${aBadge(ana.enabled ? 'Enabled' : 'Disabled', ana.enabled ? 'green' : 'gray')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">LLM: ${ana.llm_enabled ? 'enabled' : 'deterministic only'}</p>
+                    ${anaHas
+                        ? `<p class="text-xs text-gray-700 mt-1.5">${ana.jobs_analyzed} analyzed${ana.failures ? ` · ${ana.failures} failed` : ''}</p>
+                           <p class="text-[11px] text-gray-400">Last activity: ${aTime(ana.last_activity)}</p>`
+                        : '<p class="text-[11px] text-gray-400 mt-1">Metrics unavailable</p>'}
+                </div>`;
+            const intelCard = `
+                <div class="rounded-xl border border-gray-200 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-sm font-semibold text-gray-800">🎯 Job Intelligence</p>
+                        ${aBadge(intel.enabled ? 'Enabled' : 'Disabled', intel.enabled ? 'green' : 'gray')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-1">LLM: ${intel.llm_enabled ? 'enabled' : 'deterministic only'}</p>
+                    ${intelHas
+                        ? `<p class="flex flex-wrap gap-1 mt-1.5">${chip(intel.matched, 'matched')}${chip(intel.needs_review, 'review')}${chip(intel.not_matched, 'not matched')}${chip(intel.unavailable, 'unavailable')}</p>
+                           <p class="text-xs text-gray-700 mt-1.5">${intel.jobs_evaluated} evaluated${intel.failures ? ` · ${intel.failures} failed` : ''}</p>
+                           <p class="text-[11px] text-gray-400">Last activity: ${aTime(intel.last_activity)}</p>`
+                        : '<p class="text-[11px] text-gray-400 mt-1">Metrics unavailable</p>'}
+                </div>`;
+            document.getElementById('agentActivity').innerHTML = anaCard + intelCard;
+        }
+
+        function renderActivity(items) {
+            const wrap = document.getElementById('recentActivity');
+            if (!items || !items.length) {
+                wrap.innerHTML = '<p class="text-xs text-gray-400">No activity recorded yet — events appear here as the system runs.</p>';
+                return;
+            }
+            wrap.innerHTML = items.map(it => {
+                const icons = { ok: '✅', warn: '⚠️', info: '💬' };
+                const tints = { ok: 'text-emerald-700', warn: 'text-amber-700', info: 'text-gray-700' };
+                return `<div class="flex items-start gap-2 py-1.5 border-b border-gray-50 last:border-0">
+                    <span class="leading-5">${icons[it.level] || '•'}</span>
+                    <p class="text-xs flex-1 ${tints[it.level] || 'text-gray-700'}">${esc(it.text)}</p>
+                    <span class="text-[10px] text-gray-400 whitespace-nowrap leading-5">${it.time ? timeAgo(it.time) : ''}</span>
+                </div>`;
+            }).join('');
+        }
+
+        async function fetchAutomation() {
+            const load = document.getElementById('autoLoading');
+            const body = document.getElementById('autoBody');
+            try {
+                const res = await api('/api/automation/status');
+                const d = await res.json();
+                renderSystemStatus(d);
+                renderWorkflows(d.workflows);
+                renderSources(d.sources);
+                renderAgents(d.agents);
+                renderActivity(d.recent_activity);
+                load.classList.add('hidden');
+                body.classList.remove('hidden');
+            } catch (e) {
+                body.classList.add('hidden');
+                load.classList.remove('hidden');
+                load.textContent = 'Cannot reach the backend — automation status unavailable.';
+            }
+        }
+
         /* ============ init ============ */
         function setAutoRefreshUI() {
             const on = localStorage.getItem('auto_refresh') !== '0';
@@ -1566,12 +1954,21 @@ function setStatus(s) {
         function configureRefresh() {
             clearInterval(_int);
             if (localStorage.getItem('auto_refresh') !== '0') {
-                _int = setInterval(() => { if (navigator.onLine) { fetchStats(); loadJobs(); } }, 30000);
+                _int = setInterval(() => {
+                    if (!navigator.onLine) return;
+                    fetchStats(); loadJobs();
+                    if (_view === 'automation') fetchAutomation();
+                }, 30000);
             }
         }
         window.addEventListener('online', () => { setOnline(true); flushQueue(); });
         window.addEventListener('offline', () => setOnline(false));
-        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { fetchStats(); loadJobs(); updateOfflineUI(); } });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                fetchStats(); loadJobs(); updateOfflineUI();
+                if (_view === 'automation') fetchAutomation();
+            }
+        });
 
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
             navigator.serviceWorker.register('/static/dashboard/service-worker.js').then(() => navigator.serviceWorker.ready).catch(() => {});

@@ -38,3 +38,59 @@ services:
         sync: false
       - key: ADZUNA_APP_KEY
         sync: false
+      - key: GOOGLE_RSS_ENABLED
+        sync: false
+      - key: GOOGLE_RSS_FEED_URLS
+        sync: false
+      - key: GOOGLE_RSS_SEARCHES
+        sync: false
+      - key: JOB_ANALYSIS_ENABLED
+        sync: false
+      - key: JOB_ANALYSIS_USE_LLM
+        value: "true"
+      - key: TEMPORAL_ADDRESS
+        sync: false
+  - type: worker
+    name: job-auto-apply-temporal-worker
+    runtime: docker
+    rootDir: backend
+    plan: free
+    # Long-running Temporal worker (backend/temporal_worker.py). If
+    # TEMPORAL_ADDRESS is empty it exits cleanly and the built-in main.py
+    # scheduler keeps fetching — a harmless no-op.
+    startCommand: python temporal_worker.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: YOUR_EMAIL
+        sync: false
+      - key: DEBUG
+        value: "false"
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: GOOGLE_RSS_ENABLED
+        sync: false
+      - key: GOOGLE_RSS_FEED_URLS
+        sync: false
+      - key: GOOGLE_RSS_SEARCHES
+        sync: false
+      - key: JOB_ANALYSIS_ENABLED
+        sync: false
+      - key: JOB_ANALYSIS_USE_LLM
+        value: "true"
+      - key: TEMPORAL_ADDRESS
+        sync: false
+      - key: TEMPORAL_NAMESPACE
+        value: default
+      - key: TEMPORAL_API_KEY
+        sync: false
+      - key: TEMPORAL_TASK_QUEUE
+        value: job-auto-apply
+      - key: TEMPORAL_FETCH_INTERVAL_HOURS
+        value: "12"

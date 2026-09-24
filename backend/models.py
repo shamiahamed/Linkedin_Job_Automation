@@ -26,6 +26,14 @@ class Job(Base):
     # Auto-fetch run marker (timestamp) so the last N fetch batches can be
     # identified and deleted together from the dashboard.
     fetch_batch = Column(String(50), nullable=True)
+    # Job Analysis Agent output (JSON dict; see services/job_analyzer.py schema).
+    # Nullable: existing/pre-Phase-2 jobs simply have none. Purely informational
+    # enrichment — the analyzer NEVER affects auto-apply/email/notify/dedupe.
+    job_analysis = Column(JSON, nullable=True)
+    # Job Intelligence Agent output (JSON dict; see services/job_intelligence.py
+    # schema). Nullable: existing jobs / jobs captured while disabled have none.
+    # Purely informational enrichment — never affects any downstream automation.
+    job_intelligence = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -48,6 +56,8 @@ class Job(Base):
             "status": self.status,
             "saved": bool(self.saved),
             "fetch_batch": self.fetch_batch,
+            "job_analysis": self.job_analysis,
+            "job_intelligence": self.job_intelligence,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -136,5 +146,44 @@ class PushSubscription(Base):
         return {
             "id": self.id,
             "endpoint": self.endpoint,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AutomationRun(Base):
+    """Lightweight, persistent record of a workflow/agent activity tick (Phase 7).
+
+    Read-only observability: the dashboard Automation view surfaces the last few
+    rows, the frontend NEVER writes here. Deliberately small/anonymised on
+    purpose — it stores counts and short status strings only, never job
+    descriptions, prompts/responses, secrets, API keys, or exception traces.
+    Currently the only recorded workflow is the external job fetch (Adzuna +
+    Google RSS); LinkedIn/mobile captures are derived from the jobs table
+    directly, so this table stays tiny."""
+
+    __tablename__ = "automation_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workflow = Column(String(50), nullable=False)   # e.g. "external_job_fetch"
+    source = Column(String(50), nullable=False)     # e.g. "adzuna" / "google_rss"
+    status = Column(String(20), nullable=False, default="completed")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    items_found = Column(Integer, default=0)
+    items_ingested = Column(Integer, default=0)
+    error_summary = Column(String(255), nullable=True, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "workflow": self.workflow,
+            "source": self.source,
+            "status": self.status,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "items_found": self.items_found,
+            "items_ingested": self.items_ingested,
+            "error_summary": self.error_summary,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

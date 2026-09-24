@@ -19,6 +19,8 @@ _ADDITIONS = [
     ("jobs", "has_phone", "BOOLEAN"),
     ("jobs", "saved", "BOOLEAN"),
     ("jobs", "fetch_batch", "VARCHAR(50)"),
+    ("jobs", "job_analysis", "JSON"),
+    ("jobs", "job_intelligence", "JSON"),
     ("jobs", "updated_at", "TIMESTAMPTZ DEFAULT now()"),
     ("applications", "follow_up_at", "TIMESTAMPTZ"),
     ("applications", "followed_up_at", "TIMESTAMPTZ"),
@@ -34,6 +36,46 @@ _ADDITIONS = [
 _ALTERS = [
     ("jobs", "experience", "VARCHAR(255)"),
 ]
+
+
+def sqlite_migrate(engine) -> None:
+    """Idempotent ALTER TABLE additions for existing SQLite databases.
+
+    Runs at every startup (via main.py) and no-ops once each column exists.
+    Mirrors the Postgres additions above so both dialects converge on the same
+    final schema. Failures are swallowed — create_all already built the full
+    schema on fresh databases, so a cold DB is safe to keep booting regardless.
+    """
+    from sqlalchemy import text as _sql
+
+    try:
+        with engine.connect() as _conn:
+            _cols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(jobs)")).fetchall()]
+            for _col, _def in (("apply_link", "TEXT"), ("updated_at", "DATETIME"),
+                               ("saved", "BOOLEAN"), ("fetch_batch", "TEXT"),
+                               ("job_analysis", "JSON"),
+                               ("job_intelligence", "JSON")):
+                if _col not in _cols:
+                    _conn.execute(_sql(f"ALTER TABLE jobs ADD COLUMN {_col} {_def}"))
+            _conn.execute(_sql("UPDATE jobs SET updated_at = created_at WHERE updated_at IS NULL"))
+
+            _acols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(applications)")).fetchall()]
+            for _col, _def in (("follow_up_at", "DATETIME"), ("followed_up_at", "DATETIME"),
+                               ("outcome", "VARCHAR(20)"), ("notes", "TEXT")):
+                if _col not in _acols:
+                    _conn.execute(_sql(f"ALTER TABLE applications ADD COLUMN {_col} {_def}"))
+
+            _conn.execute(_sql(
+                "CREATE TABLE IF NOT EXISTS push_subscriptions ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "endpoint VARCHAR(500) NOT NULL UNIQUE, "
+                "p256dh VARCHAR(255) NOT NULL, "
+                "auth VARCHAR(255) NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            _conn.commit()
+    except Exception:
+        pass
 
 
 def migrate(engine) -> None:

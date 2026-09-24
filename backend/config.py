@@ -64,6 +64,69 @@ class Config:
     # cards are fresh/real openings, not stale reposts.
     ADZUNA_MAX_DAYS_OLD = int(os.getenv("ADZUNA_MAX_DAYS_OLD", "3") or "3")
 
+    # Google RSS job source (second external feed; deterministic parse, no key).
+    # Set GOOGLE_RSS_ENABLED=0 to turn this source off entirely.
+    GOOGLE_RSS_ENABLED = os.getenv("GOOGLE_RSS_ENABLED", "true")
+    # Direct feed URLs (comma-separated) — when set, these are used as-is and
+    # GOOGLE_RSS_SEARCHES is ignored. URL values are NOT rewritten.
+    GOOGLE_RSS_FEED_URLS = os.getenv("GOOGLE_RSS_FEED_URLS", "")
+    # Query/location pairs ("query-A|location-A,query-B|location-B"); falls back
+    # to the built-in DEFAULT_SEARCHES when empty.
+    GOOGLE_RSS_SEARCHES = os.getenv("GOOGLE_RSS_SEARCHES", "")
+    # URL template with {query} / {location} placeholders (both URL-quoted).
+    GOOGLE_RSS_URL_TEMPLATE = os.getenv(
+        "GOOGLE_RSS_URL_TEMPLATE",
+        "https://www.google.com/search?q={query}+{location}+jobs&output=rss&num=20",
+    )
+
+    # Job Analysis Agent (per-capture enrichment; additive — never overrides the
+    # auto-apply/email/notify decisions, never deletes a job). OFF by default so
+    # existing behaviour is 100% unchanged until the user turns it on.
+    JOB_ANALYSIS_ENABLED = os.getenv("JOB_ANALYSIS_ENABLED", "false")
+    # Use the Groq LLM to enrich fields the deterministic core could not decide.
+    # Off (or no GROQ_API_KEY) = deterministic core only.
+    JOB_ANALYSIS_USE_LLM = os.getenv("JOB_ANALYSIS_USE_LLM", "true")
+
+    # Applicant profile (Job Analysis Agent). Central place the analyzer matches
+    # against; comma-separated values, env-overridable. Roles are matched as
+    # substrings against the job title (lower-cased); skills against the full
+    # title+description text; locations are the metro/TN places the user works in
+    # (plus "Remote"); MAX_EXPERIENCE_YEARS caps roles the user can attend.
+    PROFILE_ROLES = os.getenv("PROFILE_ROLES", "")
+    PROFILE_SKILLS = os.getenv("PROFILE_SKILLS", "")
+    PROFILE_LOCATIONS = os.getenv("PROFILE_LOCATIONS", "")
+    PROFILE_MAX_EXPERIENCE_YEARS = os.getenv("PROFILE_MAX_EXPERIENCE_YEARS", "2")
+
+    # Job Intelligence Agent (per-capture evaluation; additive enrichment ONLY —
+    # never sends emails/notifications, never auto-applies, never changes status,
+    # dedupe, retention, or any downstream automation). OFF by default so existing
+    # behaviour is 100% unchanged until the user turns it on. It evaluates each
+    # new job against the existing deterministic Job Analysis results, so enable
+    # JOB_ANALYSIS_ENABLED too (its signals are the agent's authority).
+    JOB_INTELLIGENCE_ENABLED = os.getenv("JOB_INTELLIGENCE_ENABLED", "false")
+    # Use Groq to enrich ONLY the narrative (missing skills / summary / extra
+    # concerns). The deterministic verdict — the booleans and the match score —
+    # is always computed locally and can never be overridden by the LLM.
+    # Off (or no GROQ_API_KEY) = deterministic evaluation only.
+    JOB_INTELLIGENCE_USE_LLM = os.getenv("JOB_INTELLIGENCE_USE_LLM", "true")
+    # Per-evaluation Groq timeout (seconds). Bounded; failures degrade to a safe
+    # "unavailable"/deterministic-only result and never break job ingestion.
+    JOB_INTELLIGENCE_TIMEOUT = int(os.getenv("JOB_INTELLIGENCE_TIMEOUT", "45") or "45")
+
+    # Temporal (Phase 3) — scheduled Google RSS + Adzuna fetch took over by a
+    # dedicated Temporal worker service (backend/temporal_worker.py). When
+    # TEMPORAL_ADDRESS is empty the worker does NOT start and the built-in
+    # main.py scheduler stays in charge, so the app works with or without
+    # Temporal. Point both the web AND worker services at Temporal so the web
+    # service also hands over the daily fetch (no double-fetching).
+    TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "")
+    TEMPORAL_NAMESPACE = os.getenv("TEMPORAL_NAMESPACE", "default")
+    # Temporal Cloud API key (mTLS); TLS is implied when the key is set.
+    TEMPORAL_API_KEY = os.getenv("TEMPORAL_API_KEY", "")
+    TEMPORAL_TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "job-auto-apply")
+    # How often the Temporal "every 12h" fetch schedule fires.
+    TEMPORAL_FETCH_INTERVAL_HOURS = int(os.getenv("TEMPORAL_FETCH_INTERVAL_HOURS", "12") or "12")
+
     # Applicant Details
     YOUR_NAME = os.getenv("YOUR_NAME", "Shamim Ahamed J")
     YOUR_PHONE = os.getenv("YOUR_PHONE", "9894593190")

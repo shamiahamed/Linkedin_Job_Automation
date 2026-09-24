@@ -10,6 +10,7 @@ logger = logging.getLogger("uvicorn.error")
 import re
 import threading
 import time as _time
+from config import Config
 from database import get_db
 from models import Job, Application, Setting, Resume
 from services.email_builder import EmailBuilder
@@ -213,6 +214,50 @@ def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False, fetc
         if not experience and job_data.description and FRESHER_RE.search(job_data.description.lower()):
             experience = "Fresher"
 
+        # Job Analysis Agent (Phase 2): additive enrichment ONLY. The result is
+        # stored on the row and NEVER changes auto-apply/email/notify/dedupe/
+        # retention decisions. analyze_job() never raises, but keep a defensive
+        # guard so a hypothetical failure still cannot sink the capture.
+        job_analysis = None
+        if getattr(Config, "JOB_ANALYSIS_ENABLED", "false").lower() not in ("0", "false", "no", ""):
+            try:
+                from services.job_analyzer import analyze_job as _job_analyze
+
+                job_analysis = _job_analyze({
+                    "title": job_data.title,
+                    "company": job_data.company,
+                    "location": job_data.location,
+                    "description": job_data.description,
+                    "experience": experience,
+                })
+            except Exception:
+                job_analysis = {
+                    "analysis_status": "failed",
+                    "analyzed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                }
+
+        # Job Intelligence Agent (Phase 4): evaluates the job against the existing
+        # deterministic Job Analysis + the centralized profile. Additive enrichment
+        # ONLY — the result is stored on the row and NEVER changes auto-apply/
+        # email/notify/dedupe/retention. evaluate_job() never raises, but the guard
+        # below keeps a hypothetical failure from ever sinking the capture.
+        job_intelligence = None
+        if getattr(Config, "JOB_INTELLIGENCE_ENABLED", "false").lower() not in ("0", "false", "no", ""):
+            try:
+                from services.job_intelligence import evaluate_job as _evaluate
+
+                job_intelligence = _evaluate(
+                    f"{job_data.title or ''}\n{job_data.location or ''}\n"
+                    f"{experience or ''}\n{job_data.description or ''}",
+                    job_analysis,
+                )
+            except Exception:
+                job_intelligence = {
+                    "intelligence_status": "unavailable",
+                    "evaluated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                    "match_status": "unavailable",
+                }
+
         job = Job(
             title=job_data.title,
             company=job_data.company,
@@ -227,6 +272,8 @@ def ingest_job(db: Session, job_data: JobCreate, silent_push: bool = False, fetc
             apply_link=job_data.apply_link or "",
             has_email=len(job_data.emails) > 0,
             has_phone=len(job_data.phones) > 0,
+            job_analysis=job_analysis,
+            job_intelligence=job_intelligence,
         )
         db.add(job)
         try:
@@ -689,11 +736,20 @@ def fetch_jobs_now(db: Session) -> dict:
     cities) and ingest each through the shared pipeline (dedupe + auto-apply).
     Lands them as cards when auto_apply is off, or auto-fires when on.
     Every run: fetch_count += 1, jobs stamped with a fetch_batch timestamp, and
-    a record of live Adzuna API calls is kept (Adzuna trial has call limits)."""
+    a record of live Adzuna API calls is kept (Adzuna trial has call limits).
+    Also appends one small AutomationRun row per source (Phase 7 observability —
+    counts only, never content/secrets) so the Automation view can show real
+    run history."""
     from services import job_search as _js
+    from services import rss_source as _rss
+    from services.activity import record_run
     from datetime import datetime as _dt
 
+    started = _dt.utcnow().isoformat(timespec="seconds")
     if not _js.adzuna_configured():
+        record_run(db, workflow="external_job_fetch", source="adzuna",
+                   status="failed", error_summary="Adzuna keys not configured",
+                   started_at=_dt.utcnow())
         return {"success": False, "fetched": 0, "added": 0,
                 "detail": "Adzuna keys not set — add ADZUNA_APP_ID / ADZUNA_APP_KEY (free) in env"}
     keywords = _split_csv(_get_setting(db, "fetch_keywords", "")) or _js.DEFAULT_KEYWORDS
@@ -703,22 +759,43 @@ def fetch_jobs_now(db: Session) -> dict:
     except Exception:
         limit = 100
     api_calls = {}
-    results = _js.fetch_daily_jobs(keywords, cities, limit=limit, max_seconds=45, api_calls=api_calls)
+    adzuna_items = _js.fetch_daily_jobs(keywords, cities, limit=limit, max_seconds=45, api_calls=api_calls)
+    # Second external source: Google RSS (deterministic, env-configurable).
+    # A failure here must never affect the Adzuna path — nothing escapes.
+    try:
+        rss_items = list(_rss.fetch_google_rss_jobs())
+    except Exception as e:
+        rss_items = []
+        logger.warning("google rss fetch skipped: %s", e)
     before = db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0
     batch = _dt.utcnow().isoformat(timespec="seconds")
-    for item in results:
-        try:
-            if not item.get("url"):
+
+    def _ingest(items: list) -> int:
+        start = db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0
+        for item in items:
+            try:
+                if not item.get("url"):
+                    continue
+                ingest_job(db, JobCreate(**item), silent_push=True, fetch_batch=batch)
+            except Exception:
                 continue
-            ingest_job(db, JobCreate(**item), silent_push=True, fetch_batch=batch)
-        except Exception:
-            continue
-    added = (db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0) - before
+        return (db.query(func.count(Job.id)).filter(Job.source == "auto_fetch").scalar() or 0) - start
+
+    adzuna_added = _ingest(adzuna_items)
+    rss_added = _ingest(rss_items)
+    added = adzuna_added + rss_added
+    done_at = _dt.utcnow()
+    record_run(db, workflow="external_job_fetch", source="adzuna", status="completed",
+               items_found=len(adzuna_items), items_ingested=adzuna_added,
+               started_at=_dt.fromisoformat(started), completed_at=done_at)
+    record_run(db, workflow="external_job_fetch", source="google_rss", status="completed",
+               items_found=len(rss_items), items_ingested=rss_added,
+               started_at=_dt.fromisoformat(started), completed_at=done_at)
     api_searches = int(api_calls.get("searches", 0) or 0)
     fetch_count = int(_get_setting(db, "fetch_count", "0") or "0") + 1
     _set_setting(db, "fetch_count", str(fetch_count))
     _set_setting(db, "fetch_api_calls", str(int(_get_setting(db, "fetch_api_calls", "0") or "0") + api_searches))
-    summary = f"Fetched {len(results)} jobs, {added} new"
+    summary = f"Fetched {len(adzuna_items) + len(rss_items)} jobs, {added} new"
     _set_setting(db, "last_fetch_at", batch)
     _set_setting(db, "last_fetch_summary", summary)
     db.commit()
@@ -734,7 +811,7 @@ def fetch_jobs_now(db: Session) -> dict:
             )
         except Exception:
             pass
-    return {"success": True, "fetched": len(results), "added": added,
+    return {"success": True, "fetched": len(adzuna_items) + len(rss_items), "added": added,
             "api_calls": api_searches, "detail": summary}
 
 

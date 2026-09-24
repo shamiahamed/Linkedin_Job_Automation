@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from config import Config
 from database import Base, engine
 from security import require_auth, make_session_token, has_session
-from routes import jobs, applications, email_routes, resumes, push_routes
+from routes import jobs, applications, email_routes, resumes, push_routes, automation
 from migrate import migrate
 
 
@@ -35,36 +35,13 @@ _ensure_tables()
 
 migrate(engine)
 
-# Lightweight migration: add new columns to existing SQLite DB (idempotent, SQLite only)
+# Lightweight migration: add new columns to existing SQLite DB (idempotent).
+# The SQLite PRAGMA path lives in migrate.sqlite_migrate(); the PostgreSQL
+# additions run through migrate.migrate() above (both no-op when columns exist).
 if Config.DATABASE_URL.startswith("sqlite"):
-    try:
-        from sqlalchemy import text as _sql
+    from migrate import sqlite_migrate
 
-        with engine.connect() as _conn:
-            _cols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(jobs)")).fetchall()]
-            for _col, _def in (("apply_link", "TEXT"), ("updated_at", "DATETIME"),
-                               ("saved", "BOOLEAN"), ("fetch_batch", "TEXT")):
-                if _col not in _cols:
-                    _conn.execute(_sql(f"ALTER TABLE jobs ADD COLUMN {_col} {_def}"))
-            _conn.execute(_sql("UPDATE jobs SET updated_at = created_at WHERE updated_at IS NULL"))
-
-            _acols = [r[1] for r in _conn.execute(_sql("PRAGMA table_info(applications)")).fetchall()]
-            for _col, _def in (("follow_up_at", "DATETIME"), ("followed_up_at", "DATETIME"),
-                               ("outcome", "VARCHAR(20)"), ("notes", "TEXT")):
-                if _col not in _acols:
-                    _conn.execute(_sql(f"ALTER TABLE applications ADD COLUMN {_col} {_def}"))
-
-            _conn.execute(_sql(
-                "CREATE TABLE IF NOT EXISTS push_subscriptions ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "endpoint VARCHAR(500) NOT NULL UNIQUE, "
-                "p256dh VARCHAR(255) NOT NULL, "
-                "auth VARCHAR(255) NOT NULL, "
-                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
-            ))
-            _conn.commit()
-    except Exception:
-        pass
+    sqlite_migrate(engine)
 
 app = FastAPI(
     title=Config.APP_NAME,
@@ -101,6 +78,7 @@ app.include_router(applications.router, dependencies=_AUTH)
 app.include_router(email_routes.router, dependencies=_AUTH)
 app.include_router(resumes.router, dependencies=_AUTH)
 app.include_router(push_routes.router, dependencies=_AUTH)
+app.include_router(automation.router, dependencies=_AUTH)
 
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 
@@ -144,6 +122,17 @@ def health():
     """Public readiness probe for Render — deliberately OUTSIDE the API token
     gate so platform health checks (no auth header) can reach it."""
     return {"status": "ok", "app": Config.APP_NAME}
+
+
+@app.get("/api/readiness", dependencies=_AUTH, include_in_schema=False)
+def readiness():
+    """Auth-gated configuration presence check for controlled activation
+    (Phase 6). Reports BOOLEANS ONLY — never secret values, keys, or URLs.
+    Delegates to the shared shape in routes.automation so the Dashboard's
+    Automation view and this endpoint can never disagree."""
+    from routes.automation import readiness_body
+
+    return readiness_body()
 
 
 class LoginBody(BaseModel):
@@ -253,44 +242,72 @@ def root():
     }
 
 
+def temporal_handles_fetch() -> bool:
+    """True when a dedicated Temporal worker owns the scheduled fetch (Phase 3),
+    so the built-in daily loop must skip its own run and never double-fetch."""
+    return bool((Config.TEMPORAL_ADDRESS or "").strip())
+
+
+def run_scheduled_maintenance(db) -> dict:
+    """One iteration of the web process's hourly housekeeping.
+
+    ALWAYS runs purge + no-contact cleanup + (once-daily) reminders. The daily
+    external fetch runs here ONLY when Temporal does NOT own it:
+      - TEMPORAL_ADDRESS configured  -> the Temporal worker's Schedule owns the
+        Google RSS + Adzuna fetch (double-fetch prevention); purge/cleanup/
+        reminders keep running unchanged and LinkedIn ingestion (capture-time,
+        via ingest_job) is entirely independent of this loop.
+      - TEMPORAL_ADDRESS absent      -> the built-in scheduler continues as before.
+
+    Returns a plain result dict describing what this tick did (used by tests).
+    """
+    from routes.jobs import cleanup_no_contact, purge_old_jobs, fetch_jobs_now, _get_setting
+    from services.reminders import reminders_due, run_daily_reminders, mark_reminders_done
+    from datetime import datetime as _dt
+
+    result = {"purged": None, "no_contact_cleaned": None,
+              "reminders_ran": False, "fetch_attempted": False}
+    result["purged"] = purge_old_jobs(db)
+    result["no_contact_cleaned"] = cleanup_no_contact(db)
+    if reminders_due(db):
+        run_daily_reminders(db)
+        mark_reminders_done(db)
+        result["reminders_ran"] = True
+    if temporal_handles_fetch():
+        result["fetch_skipped_temporal"] = True
+        return result
+    try:
+        if _get_setting(db, "auto_fetch", "0") in ("1", "true", "yes"):
+            last = _get_setting(db, "last_fetch_at", "")
+            now = _dt.utcnow().date()
+            do = True
+            if last:
+                try:
+                    last_date = _dt.fromisoformat(last.split("T")[0]).date()
+                except Exception:
+                    last_date = None
+                do = (last_date != now)
+            if do:
+                fetch_jobs_now(db)
+                result["fetch_attempted"] = True
+    except Exception:
+        pass
+    return result
+
+
 @app.on_event("startup")
 async def _startup():
     """Create tables with retry (Neon wakes from zero on first connect), then run
     the periodic cleanup + daily-reminder + auto-fetch loop."""
     _ensure_tables(retries=3, wait=3.0)
-    from routes.jobs import cleanup_no_contact, purge_old_jobs, fetch_jobs_now, _get_setting
-    from services.reminders import reminders_due, run_daily_reminders, mark_reminders_done
     from database import SessionLocal
-    from datetime import datetime as _dt
-    from config import Config
 
     async def _loop():
         while True:
             try:
                 db = SessionLocal()
                 try:
-                    purge_old_jobs(db)
-                    cleanup_no_contact(db)
-                    if reminders_due(db):
-                        run_daily_reminders(db)
-                        mark_reminders_done(db)
-                    # Daily auto-fetch: once per day (UTC)
-                    try:
-                        if _get_setting(db, "auto_fetch", "0") in ("1", "true", "yes"):
-                            last = _get_setting(db, "last_fetch_at", "")
-                            now = _dt.utcnow().date()
-                            if not last:
-                                do = True
-                            else:
-                                try:
-                                    last_date = _dt.fromisoformat(last.split("T")[0]).date()
-                                except Exception:
-                                    last_date = None
-                                do = (last_date != now)
-                            if do:
-                                fetch_jobs_now(db)
-                    except Exception:
-                        pass
+                    run_scheduled_maintenance(db)
                 finally:
                     db.close()
             except Exception:
